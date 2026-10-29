@@ -63,5 +63,25 @@ export function addressBaseOf(ctx: Context, sessionId: string | undefined): stri
  */
 export function resolveAddressPath(base: string | undefined, path: string): string {
   const resolved = resolveSidebarPath(base, path)
-  return base !== undefined && base.includes('\\') ? resolved.replace(/[/\\]+/g, '\\') : resolved
+  // A POSIX-absolute address is never folded: `\opt\app` is a DRIVE-RELATIVE
+  // Windows path, so folding would silently replace the root with whatever
+  // drive the reader assumes (`C:\opt\app`) and open the wrong file — or none.
+  // It is also exactly what a WSL session's chat links carry, and the host
+  // bridges `/opt/...` onto the distro's UNC share itself.
+  if (/^\/(?!\/)/.test(resolved)) return resolved
+  const isWindowsOrUnc = (base !== undefined && (base.includes('\\') || /^[\\/]{2}(?:wsl\.localhost|wsl\$)/i.test(base) || /^[a-zA-Z]:/i.test(base)))
+    || /^[\\/]{2}(?:wsl\.localhost|wsl\$)/i.test(resolved)
+  if (isWindowsOrUnc) {
+    // #1024: preserve leading double backslash for UNC paths (\\wsl.localhost\...)
+    // so that collapsing separators does not strip the share prefix to a single slash (\wsl.localhost\...)
+    if (/^[\\/]{2}/.test(resolved)) {
+      return `\\\\${resolved.slice(2).replace(/[/\\]+/g, '\\')}`
+    }
+    // Also guard against single-slash or drive-prefixed WSL UNC path, restoring canonical \\wsl.localhost
+    if (/^(?:[a-zA-Z]:)?[\\/]{1,2}(?:wsl\.localhost|wsl\$)[\\/]/i.test(resolved)) {
+      return `\\\\${resolved.replace(/^(?:[a-zA-Z]:)?[\\/]+/, '').replace(/[/\\]+/g, '\\')}`
+    }
+    return resolved.replace(/[/\\]+/g, '\\')
+  }
+  return resolved
 }

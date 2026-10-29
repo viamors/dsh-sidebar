@@ -19,8 +19,12 @@
  */
 import { watch, type FSWatcher } from 'node:fs'
 import { invalidateDirectoryCache } from './fs-tree.ts'
+import { isWslUncPath } from './wsl-path.ts'
+import { createWslDirectoryWatcher, MAX_WSL_WATCHES, type WslDirectoryWatcher } from './wsl-watch.ts'
 
-/** How long a burst of filesystem events is folded into a single push. */
+/**
+ * How long a burst of filesystem events is folded into a single push.
+ */
 const DEBOUNCE_MS = 150
 
 /**
@@ -68,12 +72,15 @@ export function createDirectoryWatchers(
   push: (event: DirectoryWatchEvent) => void,
   onError: (dir: string, error: unknown) => void,
 ): DirectoryWatchers {
-  const watchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | undefined }>()
+  const watchers = new Map<string, { watcher: FSWatcher | WslDirectoryWatcher; timer: NodeJS.Timeout | undefined }>()
+  /** Directories whose entry watches the WSL loop covers (the heavier cap). */
+  const wslDirs = new Set<string>()
 
   const drop = (dir: string): void => {
     const entry = watchers.get(dir)
     if (entry === undefined) return
     watchers.delete(dir)
+    wslDirs.delete(dir)
     if (entry.timer !== undefined) clearTimeout(entry.timer)
     entry.watcher.close()
   }
@@ -101,6 +108,28 @@ export function createDirectoryWatchers(
   return {
     add(dir) {
       if (watchers.has(dir)) return true
+      // WSL paths never see native events (9P drops inotify), so a
+      // `\\wsl.localhost\` directory gets a Linux-side fingerprint loop
+      // instead; the shared cap bounds the heavier process footprint. A loop
+      // that cannot start (no WSL, distro dead) falls through to the native
+      // watcher — over 9P it registers but stays silent, which only costs the
+      // tree its live refresh, never its correctness.
+      if (process.platform === 'win32' && isWslUncPath(dir)) {
+        if (wslDirs.size >= MAX_WSL_WATCHES) return false
+        const wslWatcher = createWslDirectoryWatcher(
+          dir,
+          () => { notify(dir) },
+          (error) => {
+            onError(dir, error)
+            drop(dir)
+          },
+        )
+        if (wslWatcher !== undefined) {
+          wslDirs.add(dir)
+          watchers.set(dir, { watcher: wslWatcher, timer: undefined })
+          return true
+        }
+      }
       if (watchers.size >= MAX_WATCHES) return false
       let watcher: FSWatcher
       try {

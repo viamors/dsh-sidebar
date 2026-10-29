@@ -24,7 +24,7 @@ export function isAbsolutePath(path: string): boolean {
   // A `~`-relative path (`~`, `~/...`, `~\...`) names the user's home, not a
   // session-relative path (#713): never join it onto the cwd client-side.
   return path === '~' || path.startsWith('~/') || path.startsWith('~\\')
-    || path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || /^[\\/]{2}[^\\/]/.test(path)
+    || path.startsWith('/') || path.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(path) || /^[\\/]{2}[^\\/]/.test(path)
 }
 
 /**

@@ -96,6 +96,28 @@ describe('openWithUrl', () => {
     expect(openWithUrl(byId('zed'), '/x/y', parseOpenWithConfig({}))).toBe('zed://file//x/y')
   })
 
+  it('builds Remote-WSL URLs for VSCode-family targets with WSL UNC paths', () => {
+    const config = parseOpenWithConfig({})
+    expect(openWithUrl(byId('vscode'), '\\\\wsl.localhost\\Ubuntu\\home\\u\\f.ts', config))
+      .toBe('vscode://vscode-remote/wsl+Ubuntu/home/u/f.ts')
+    expect(openWithUrl(byId('cursor'), '//wsl$/Debian/var/log/syslog', config))
+      .toBe('cursor://vscode-remote/wsl+Debian/var/log/syslog')
+  })
+
+  it('builds local Windows drive file URLs for DrvFs /mnt/<drive> paths', () => {
+    const config = parseOpenWithConfig({})
+    expect(openWithUrl(byId('vscode'), '/mnt/d/AIWorkspace/DSH/f.ts', config))
+      .toBe('vscode://file/D:/AIWorkspace/DSH/f.ts')
+    expect(openWithUrl(byId('vscode'), '\\\\wsl.localhost\\Ubuntu\\mnt\\c\\Users\\u\\f.ts', config))
+      .toBe('vscode://file/C:/Users/u/f.ts')
+  })
+
+  it('keeps local template URL for non-VSCode-family targets with WSL paths', () => {
+    const config = parseOpenWithConfig({})
+    expect(openWithUrl(byId('zed'), '\\\\wsl.localhost\\Ubuntu\\home\\u\\f.ts', config))
+      .toBe('zed://file///wsl.localhost/Ubuntu/home/u/f.ts')
+  })
+
   it('builds SSH-remote URLs for VSCode-family targets in SSH mode', () => {
     const config = parseOpenWithConfig({ sshHost: 'dev' })
     expect(openWithUrl(byId('vscode'), '/home/u/f.ts', config))

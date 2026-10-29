@@ -51,6 +51,32 @@ describe('resolveSessionPath', () => {
     expect(resolveSessionPath('//WSL.LOCALHOST/Ubuntu/home/me/project', '/home/me/project/a.ts', 'win32'))
       .toBe('\\\\wsl.localhost\\Ubuntu\\home\\me\\project\\a.ts')
   })
+
+  it('recognizes wsl$ UNC cwd spelling', () => {
+    expect(resolveSessionPath('\\\\wsl$\\Debian\\home\\user\\project', '/home/user/project/b.ts', 'win32'))
+      .toBe('\\\\wsl.localhost\\Debian\\home\\user\\project\\b.ts')
+  })
+
+  it('recognizes POSIX or corrupted drive cwd for WSL sessions on Windows host', () => {
+    expect(resolveSessionPath('/opt/AI_workspace/yxy-channel', '/opt/AI_workspace/yxy-channel/file.ts', 'win32'))
+      .toBe('\\\\wsl.localhost\\Ubuntu\\opt\\AI_workspace\\yxy-channel\\file.ts')
+    expect(resolveSessionPath('C:\\opt\\AI_workspace\\yxy-channel', '/opt/AI_workspace/yxy-channel/file.ts', 'win32'))
+      .toBe('\\\\wsl.localhost\\Ubuntu\\opt\\AI_workspace\\yxy-channel\\file.ts')
+  })
+
+  it('maps DrvFs /mnt/<drive> paths to Windows drive paths', () => {
+    expect(resolveSessionPath(WSL_CWD, '/mnt/d/AIWorkspace/DSH/file.ts', 'win32'))
+      .toBe('D:\\AIWorkspace\\DSH\\file.ts')
+    expect(resolveSessionPath('C:\\Users\\zdaar\\project', '/mnt/c/Users/zdaar/file.ts', 'win32'))
+      .toBe('C:\\Users\\zdaar\\file.ts')
+  })
+
+  it('normalizes corrupted or drive-prefixed WSL UNC targets', () => {
+    expect(resolveSessionPath(WSL_CWD, '\\wsl.localhost\\Ubuntu\\opt\\test.json', 'win32'))
+      .toBe('\\\\wsl.localhost\\Ubuntu\\opt\\test.json')
+    expect(resolveSessionPath(WSL_CWD, 'C:\\wsl.localhost\\Ubuntu\\opt\\test.json', 'win32'))
+      .toBe('\\\\wsl.localhost\\Ubuntu\\opt\\test.json')
+  })
 })
 
 /**

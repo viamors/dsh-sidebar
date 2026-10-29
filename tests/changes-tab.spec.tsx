@@ -408,12 +408,12 @@ describe('ChangesTab', () => {
       expect(container.textContent).toContain('src/a.ts')
       const chips = [...container.querySelectorAll('button[aria-pressed]')]
       expect(chips.some(chip => /写入\s*2|Write\s*2/.test(chip.textContent ?? ''))).toBe(true)
-      // The Git lens (including its footer branch menu) is RETAINED behind the
+      // The Git lens (including its toolbar chip row) is RETAINED behind the
       // switch: hidden, state intact, and no longer fetching.
       const gitRoot = container.querySelector<HTMLElement>('[data-git-root]')!
       expect(gitRoot).not.toBeNull()
       expect((gitRoot.closest('[role="tabpanel"]') as HTMLElement).hidden).toBe(true)
-      expect(gitRoot.querySelector('[data-git-footer]')).not.toBeNull()
+      expect(gitRoot.querySelector('[data-git-toolbar]')).not.toBeNull()
     } finally {
       act(() => { root.unmount() })
       container.remove()
@@ -605,12 +605,13 @@ describe('ChangesTab', () => {
       // channel and is quiet here).
       expect(alerts.filter(node => (node.textContent ?? '').includes(t('changesStageFailed', { message: 'index.lock exists' }))))
         .toHaveLength(1)
-      // The ONE action status line stays visible with the checkout/sync footer.
-      const footer = container.querySelector('[data-git-footer]')
+      // The ONE action status line stays visible in the docked toolbar, under
+      // the chip row.
+      const toolbar = container.querySelector('[data-git-toolbar]')
       const input = container.querySelector('[data-message-box] textarea')
       expect(input).not.toBeNull()
-      expect(alert!.parentElement).toBe(footer)
-      expect(alert!.nextElementSibling).toBe(footer!.querySelector('[data-footer-row]'))
+      expect(alert!.parentElement).toBe(toolbar)
+      expect(alert!.previousElementSibling).toBe(toolbar!.querySelector('[data-toolbar-row]'))
       expect(container.querySelector('[data-git-scroll]')!.contains(alert!)).toBe(false)
     } finally {
       act(() => { root.unmount() })
@@ -697,11 +698,12 @@ describe('ChangesTab', () => {
       const head = container.querySelector('[role="tablist"]')!.parentElement!
       const gitPanel = (): HTMLElement => [...container.querySelectorAll<HTMLElement>('[role="tabpanel"]')]
         .find(node => node.id.endsWith('-git-panel'))!
-      // Git has one refresh, inside Changes rather than beside the lens tabs;
-      // the session lens's own action lives in the header instead.
+      // Git has one refresh, inside the lens's docked chip row rather than
+      // beside the lens tabs; the session lens's own action lives in the
+      // header instead.
       expect(head.querySelector(refreshSelector)).toBeNull()
       expect(gitPanel().querySelectorAll(refreshSelector)).toHaveLength(1)
-      expect(container.querySelector(`[data-scm-section="changes"] ${refreshSelector}`)).not.toBeNull()
+      expect(container.querySelector(`[data-git-toolbar] ${refreshSelector}`)).not.toBeNull()
       const sessionTab = lensTab(container, t('changesSessionLens'))
       await act(async () => { sessionTab!.click() })
 
@@ -848,17 +850,19 @@ describe('ChangesTab', () => {
 
       const frame = container.querySelector<HTMLElement>('[data-git-root]')
       const scroller = container.querySelector<HTMLElement>('[data-git-scroll]')
-      const footer = container.querySelector<HTMLElement>('[data-git-footer]')
+      const toolbar = container.querySelector<HTMLElement>('[data-git-toolbar]')
       expect(frame).not.toBeNull()
       expect(scroller).not.toBeNull()
-      expect(footer).not.toBeNull()
+      expect(toolbar).not.toBeNull()
       expect(frame!.hasAttribute('data-git-scroll')).toBe(false)
       expect(container.querySelectorAll('[data-git-scroll]')).toHaveLength(1)
       expect(scroller!.parentElement).toBe(frame)
-      expect(footer!.parentElement).toBe(frame)
-      expect(scroller!.contains(footer!)).toBe(false)
-      expect(scroller!.compareDocumentPosition(footer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-      expect(footer!.querySelector('[data-footer-row] button[aria-haspopup="menu"]')).not.toBeNull()
+      expect(toolbar!.parentElement).toBe(frame)
+      expect(scroller!.contains(toolbar!)).toBe(false)
+      // The chip row docks ABOVE the scroller now, so it stays put while the
+      // change list scrolls under it.
+      expect(scroller!.compareDocumentPosition(toolbar!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+      expect(toolbar!.querySelector('[data-toolbar-row] button[aria-haspopup="menu"]')).not.toBeNull()
       expect(container.querySelector('[data-git-head]')).toBeNull()
       expect(container.querySelector('[data-commit-bar]')).toBeNull()
 
@@ -879,14 +883,14 @@ describe('ChangesTab', () => {
       const graphRow = graph!.querySelector<HTMLElement>('[data-graph-commit]')
       expect(graphRow).not.toBeNull()
       expect(graphRow!.textContent).toContain(GRAPH_SUBJECT)
-      expect(footer!.querySelector('textarea')).toBeNull()
+      expect(toolbar!.querySelector('textarea')).toBeNull()
     } finally {
       act(() => { root.unmount() })
       container.remove()
     }
   })
 
-  it('keeps one inner scroller and pins the footer to the bottom (#194, #941)', () => {
+  it('keeps one inner scroller and docks the chip row at the top (#194, #941)', () => {
     // jsdom has no layout engine, so the sheet itself is the docking evidence.
     const sheet = readFileSync('src/client/changes/changes.module.css', 'utf8')
     const rule = (selector: string): string => {
@@ -905,12 +909,15 @@ describe('ChangesTab', () => {
     expect(rule('.graphSection')).toContain('flex: 1')
     expect(rule('.graphArea')).toContain('flex: 1')
     expect(rule('.graphArea')).not.toContain('height: min(')
-    // Docked by flex, and sticky so a host-scrolled tab body cannot carry the
-    // branch control off the bottom of the pane either.
-    expect(rule('.gitFooter')).toContain('flex: none')
-    expect(rule('.gitFooter')).toContain('position: sticky')
-    expect(rule('.gitFooter')).toContain('bottom: 0')
-    expect(rule('.gitFooter')).not.toContain('overflow')
+    // Docked by flex as the column's first row: the chips never scroll away
+    // with the change list. NO z-index — a stacking toolbar would paint over
+    // the floating window's resize grip.
+    expect(rule('.gitToolbar')).toContain('flex: none')
+    expect(rule('.gitToolbar')).not.toContain('overflow')
+    expect(rule('.gitToolbar')).not.toContain('z-index')
+    expect(rule('.toolbarRow')).toContain('flex: 1')
+    expect(rule('.toolbarPills')).toContain('overflow: hidden')
+    expect(rule('.pill')).toContain('border-radius')
     expect(rule('.messageBox')).not.toMatch(/position|sticky|overflow/)
     expect(sheet).not.toMatch(/\.(?:selectors|select|branchLabel|commitBar|commitRow)\s*\{/)
     // The retained group headers still park on the inner body's top edge.

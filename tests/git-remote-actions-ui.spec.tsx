@@ -110,10 +110,10 @@ describe('GitLens More Actions menu: remote actions', () => {
       const error = errorLine(container, `${t('pullError')}: Not possible to fast-forward`)
       expect(error).toBeDefined()
       expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1)
-      expect(container.querySelector('[data-git-footer]')!.contains(error!)).toBe(true)
+      expect(container.querySelector('[data-git-toolbar]')!.contains(error!)).toBe(true)
 
       // A screenful of git stderr keeps its height but must be dismissible
-      // instead of squatting in the docked footer.
+      // instead of squatting in the docked toolbar.
       const dismiss = error!.querySelector<HTMLButtonElement>(`button[aria-label="${t('dismiss')}"]`)
       expect(dismiss).not.toBeNull()
       act(() => { dismiss!.click() })

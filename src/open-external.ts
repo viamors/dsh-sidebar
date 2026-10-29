@@ -13,6 +13,15 @@ import { execFileSync, spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { messageOf, parentOf, requireAbsolute } from './fs-tree.ts'
 import { SidebarError } from './wire.ts'
+import {
+  bridgeToWindowsHostPath,
+  drvFsToWindowsPath,
+  isDrvFsPath,
+  isWslUncPath,
+  normalizeWslUncForWindows,
+  parseWslUncPath,
+  toVscodeRemoteWslUrl,
+} from './wsl-path.ts'
 
 /** The two external open actions the route accepts. */
 export type OpenExternalAction = 'reveal' | 'url'
@@ -99,8 +108,17 @@ export function revealCommand(
       return { command: 'open', args: ['-R', path] }
     // Explorer expects `/select,<path>` as one argument. Keep the spawn
     // shell-free: a command shell would reinterpret valid path characters.
-    case 'win32':
-      return { command: 'explorer.exe', args: [`/select,${path}`] }
+    case 'win32': {
+      let winPath = path
+      if (isDrvFsPath(winPath)) {
+        winPath = drvFsToWindowsPath(winPath, '\\')
+      } else if (isWslUncPath(winPath)) {
+        winPath = normalizeWslUncForWindows(winPath)
+      } else {
+        winPath = winPath.replace(/\//g, '\\')
+      }
+      return { command: 'explorer.exe', args: [`/select,${winPath}`] }
+    }
     // Termux (the dominant Node runtime reporting platform "android") has no
     // desktop file manager and no xdg-open; `termux-open` hands the path to
     // Android's system open-with chooser. Fall through to the parent dir like
@@ -197,20 +215,53 @@ export function urlCommands(
 }
 
 /** Convert the built-in VSCode-family local-file URL to its Remote-WSL form.
- * A POSIX path produces `scheme://file//...`; keep one leading slash when it
- * moves behind the `wsl+<distro>` authority. Other custom schemes are left
- * alone and merely dispatched through the Windows protocol handler. */
-export function wslRemoteEditorUrl(url: string, distroName: string): string {
-  const match = /^(vscode(?:-insiders)?|cursor):\/\/file(\/\/.*)$/i.exec(url)
+ * Supports:
+ * 1. WSL UNC URLs: `vscode://file//wsl.localhost/<distro>/...` or `//wsl$/<distro>/...`
+ * 2. WSL POSIX URLs: `vscode://file//home/...`
+ * 3. DrvFs mount URLs: `vscode://file//wsl.localhost/<distro>/mnt/c/...`
+ * Other custom schemes are left alone and merely dispatched through the Windows protocol handler.
+ *
+ * `platform` is a seam: on a WINDOWS host a bare POSIX path (the DSH host
+ * reports WSL session cwds as `/opt/...`) has no `WSL_DISTRO_NAME` to name the
+ * distro, so it is bridged to the real distro UNC first; on a Linux host the
+ * env var remains the only source of truth. */
+export function wslRemoteEditorUrl(
+  url: string,
+  distroName: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const match = /^(vscode(?:-insiders)?|cursor|windsurf):\/\/file(\/.*)$/i.exec(url)
   if (match === null) return url
-  const scheme = match[1]
-  const remotePath = match[2]
-  if (scheme === undefined || remotePath === undefined) return url
-  const distro = distroName.trim()
-  if (distro === '') {
+  const scheme = match[1]!
+  const rawPath = match[2]!
+
+  // Check if rawPath is a WSL UNC path (e.g. //wsl.localhost/Ubuntu/... or //wsl$/Ubuntu/...)
+  const unc = parseWslUncPath(rawPath)
+  if (unc !== undefined) {
+    if (isDrvFsPath(unc.linuxPath)) {
+      return `${scheme}://file/${drvFsToWindowsPath(unc.linuxPath, '/')}`
+    }
+    return toVscodeRemoteWslUrl(scheme, unc.distro, unc.linuxPath)
+  }
+
+  // Check if rawPath is a POSIX linux absolute path (e.g. //home/... or //mnt/...)
+  if (rawPath.startsWith('//')) {
+    const remotePath = rawPath.slice(1)
+    const distro = distroName.trim()
+    if (distro !== '') return toVscodeRemoteWslUrl(scheme, distro, remotePath)
+    if (platform === 'win32') {
+      // A Windows host has no WSL_DISTRO_NAME: bridge the POSIX path onto the
+      // default distro's UNC and read the distro back out of it. A path that
+      // does not bridge (a non-WSL share) falls through to the error below.
+      const bridged = parseWslUncPath(bridgeToWindowsHostPath(remotePath, undefined, { platform }))
+      if (bridged !== undefined) {
+        return toVscodeRemoteWslUrl(scheme, bridged.distro, bridged.linuxPath)
+      }
+    }
     throw new SidebarError('internal', 'WSL_DISTRO_NAME is unavailable; cannot build a Remote-WSL editor URL', 500)
   }
-  return `${scheme}://vscode-remote/wsl+${distro}${remotePath.slice(1)}`
+
+  return url
 }
 
 /** Validate a URL-scheme open target: a parseable custom-scheme URL (never
@@ -317,10 +368,36 @@ export function launchExternal(
   // a non-scheme URL throws here, so nothing is launched for a bad request.
   let chain: ExternalCommand[]
   if (action === 'reveal') {
-    chain = [revealCommand(requireAbsolute(value), platform, commandOptions)]
+    let target = value
+    if (platform === 'win32') {
+      if (isDrvFsPath(target)) {
+        target = drvFsToWindowsPath(target, '\\')
+      } else if (isWslUncPath(target)) {
+        target = normalizeWslUncForWindows(target)
+      }
+    }
+    chain = [revealCommand(requireAbsolute(target), platform, commandOptions)]
   } else {
     let url = validateExternalUrl(value)
-    if (wsl) url = wslRemoteEditorUrl(url, options.distroName ?? process.env.WSL_DISTRO_NAME ?? '')
+    const filePath = url.replace(/^[a-z0-9+.-]+:\/\/file/i, '')
+    // On a Windows host a `file:///`-style URL whose path starts with `/` is
+    // NOT a drive path: it is how a POSIX (WSL) target is spelled, and handing
+    // it to the OS opens `C:\<path>` instead. `file:////wsl.localhost/...` and
+    // `\\wsl.localhost\...` are recognised by shape; a bare `/opt/...` needs
+    // the bridge. A path that cannot be attributed to a distro falls back to
+    // the plain URL below instead of failing the open.
+    const posixOnWindows = platform === 'win32' && filePath.startsWith('/') && !/^\/[a-zA-Z]:/.test(filePath)
+    if (wsl || isWslUncPath(filePath) || posixOnWindows) {
+      try {
+        url = wslRemoteEditorUrl(url, options.distroName ?? process.env.WSL_DISTRO_NAME ?? '', platform)
+      } catch (error) {
+        // The Linux host owns `WSL_DISTRO_NAME` and must fail loudly there;
+        // a Windows host has no such env and may legitimately hold a URL that
+        // is not a WSL location at all (a plain UNC share, `/foo`).
+        if (!wsl) url = validateExternalUrl(value)
+        else throw error
+      }
+    }
     chain = urlCommands(url, platform, commandOptions)
   }
 

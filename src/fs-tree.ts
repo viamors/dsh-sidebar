@@ -17,10 +17,13 @@
  * for the explorer's breadcrumb folding.
  */
 import { opendir, readdir, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import type { Dir, Dirent } from 'node:fs'
 import { basename, dirname, isAbsolute, resolve, sep } from 'node:path'
 import { SidebarError } from './wire.ts'
 import type { ExcludeMatcher } from './exclude-patterns.ts'
+import { bridgeToWindowsHostPath, drvFsToWindowsPath, isDrvFsPath, isWslUncPath, normalizeWslUncForWindows } from './wsl-path.ts'
+import { isWslEnumerationCandidate, listDirectoryViaWsl, rowsFromWslEntries } from './wsl-listing.ts'
 
 /** One explorer row. */
 export interface SidebarFsEntry {
@@ -167,8 +170,24 @@ async function readDirectory(path: string, maxEntries: number, exclude?: Exclude
     // roughly half the wall time of `for await (const dirent of await opendir())`
     // and gives the same Dirent objects.
     dirents = await readdir(path, { withFileTypes: true })
-  } catch (error) {
-    throw new SidebarError('fs-error', `cannot list "${path}": ${messageOf(error)}`, 400)
+  } catch (nativeError) {
+    // WSL fallback: a `\\wsl.localhost\` level that 9P refuses to list is
+    // retried from inside the distro (one `find` pass over the native
+    // filesystem). Measured on this stack, the 9P readdir beats the wsl.exe
+    // spawn even at 10k entries (~30ms vs ~150ms), so the Linux-side pass is
+    // a RESILIENCE fallback for a broken 9P session — not the default. A
+    // distro-side failure rethrows the original native error.
+    if (isWslEnumerationCandidate(path)) {
+      const entries = await listDirectoryViaWsl(path)
+      if (entries !== undefined) {
+        const { rows, truncated } = rowsFromWslEntries(path, entries, maxEntries, exclude)
+        await probeSymlinkTargets(rows, gate)
+        if (!truncated) await probeCompactRows(rows, exclude, gate)
+        rows.sort(compareEntries)
+        return { path, entries: rows, truncated }
+      }
+    }
+    throw new SidebarError('fs-error', `cannot list "${path}": ${messageOf(nativeError)}`, 400)
   }
   const prefix = path.endsWith(sep) ? path : `${path}${sep}`
   // The user's exclude list removes matched rows entirely (VS Code's
@@ -403,6 +422,22 @@ export function parentOf(path: string): string | undefined {
  * stay rejected.
  */
 export function requireAbsolute(path: string): string {
+  if (process.platform === 'win32') {
+    // `existsSync` is the disambiguator for a drive-rooted POSIX-looking path:
+    // a real `C:\opt\msys64` folder must never be rewritten into the distro.
+    const bridged = bridgeToWindowsHostPath(path, undefined, { exists: existsSync })
+    if (isWslUncPath(bridged)) {
+      return normalizeWslUncForWindows(bridged)
+    }
+    if (isDrvFsPath(path)) {
+      return drvFsToWindowsPath(path, '\\')
+    }
+    if (bridged !== path) {
+      return bridged
+    }
+  } else if (isWslUncPath(path)) {
+    return normalizeWslUncForWindows(path)
+  }
   if (!isAbsolute(path)) {
     throw new SidebarError('fs-error', `"${path}" is not an absolute path`, 400)
   }

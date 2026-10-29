@@ -1,8 +1,13 @@
-import { readFileSync, statSync } from 'node:fs'
-import { win32 } from 'node:path'
-
-/** `\\wsl.localhost\<distro>` root of a Windows-hosted WSL workspace. */
-const WSL_LOCALHOST_ROOT = /^\\\\wsl\.localhost\\([^\\]+)(?:\\|$)/i
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { posix, win32 } from 'node:path'
+import {
+  bridgeToWindowsHostPath,
+  drvFsToWindowsPath,
+  isDrvFsPath,
+  isWslUncPath,
+  normalizeWslUncForWindows,
+  parseWslUncPath,
+} from './wsl-path.ts'
 
 /**
  * `<...>\.dsh\remote-workspaces\<host-key>\<workspace>` mirror root of a
@@ -103,17 +108,37 @@ export function resolveSessionPath(
   target: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
-  if (platform !== 'win32' || !/^\/(?!\/)/.test(target)) return target
+  if (platform !== 'win32') return target
 
-  // Session cwd can be spelled with either separator style. Normalize only
-  // for detection; the returned host path is always canonical win32.
-  const normalizedCwd = cwd.replace(/\//g, '\\')
-  const wsl = WSL_LOCALHOST_ROOT.exec(normalizedCwd)
-  if (wsl !== null) {
-    const distroRoot = `\\\\wsl.localhost\\${wsl[1]}`
-    const relative = target.slice(1).replace(/\//g, '\\')
+  // If target is a WSL DrvFs mount (/mnt/c/...), map it to Windows drive format
+  if (isDrvFsPath(target)) {
+    return drvFsToWindowsPath(target, '\\')
+  }
+
+  // If target is already a WSL UNC path (including single-slash or drive-prefixed), normalize it
+  if (isWslUncPath(target)) {
+    return normalizeWslUncForWindows(target)
+  }
+
+  // Normalize cwd to Windows host representation (bridges /opt/..., /mnt/..., C:\opt\...)
+  const effectiveCwd = bridgeToWindowsHostPath(cwd, undefined, { exists: existsSync })
+  const normalizedCwd = effectiveCwd.replace(/\//g, '\\')
+  const wsl = parseWslUncPath(effectiveCwd)
+
+  // Collapse `..` in the POSIX namespace BEFORE projecting. `posix.normalize`
+  // is what the far side would have done, and it clamps at the root, so
+  // `/opt/app/../../etc/hosts` becomes `/etc/hosts` instead of a `..` sequence
+  // that `win32.resolve` would walk out of the distro/mirror root with.
+  const posixTarget = /^\/(?!\/)/.test(target) ? posix.normalize(target) : undefined
+
+  if (wsl !== undefined) {
+    if (posixTarget === undefined) return target
+    const distroRoot = `\\\\wsl.localhost\\${wsl.distro}`
+    const relative = posixTarget.slice(1).replace(/\//g, '\\')
     return win32.resolve(distroRoot, relative)
   }
+
+  if (posixTarget === undefined) return target
 
   // A dsh-remote mirror: map the remote workspace path onto the local mirror
   // root. Only paths inside the mirrored workspace are projected.
@@ -122,7 +147,7 @@ export function resolveSessionPath(
     const mirrorRoot = mirror[1]!
     const remotePath = remotePathOf(mirrorRoot)
     if (remotePath !== undefined) {
-      const relative = relativeUnderPosix(remotePath, target)
+      const relative = relativeUnderPosix(remotePath, posixTarget)
       if (relative !== undefined) {
         return relative === '' ? win32.resolve(mirrorRoot) : win32.resolve(mirrorRoot, relative.replace(/\//g, '\\'))
       }

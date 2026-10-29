@@ -10,6 +10,12 @@
  * the exported types and functions.
  */
 import type { CopyKey } from './locales.ts'
+import {
+  drvFsToWindowsPath,
+  isDrvFsPath,
+  parseWslUncPath,
+  toVscodeRemoteWslUrl,
+} from '../wsl-path.ts'
 
 /** One user-configured editor (persisted in `pluginSettings['editor'].openWith`). */
 export interface CustomEditor {
@@ -189,6 +195,24 @@ export function openWithUrl(target: OpenWithTarget, path: string, config: OpenWi
     return `${scheme}://vscode-remote/ssh-remote+${config.sshHost.trim()}${normalized}`
   }
   if (!target.urlTemplate.includes('{path}') || !hasUrlScheme(target.urlTemplate)) return undefined
+
+  // Handle WSL UNC and DrvFs paths for VSCode-family editors
+  if (target.isVscodeFamily) {
+    const scheme = schemeOf(target.urlTemplate)
+    if (scheme !== undefined) {
+      const unc = parseWslUncPath(path)
+      if (unc !== undefined) {
+        if (isDrvFsPath(unc.linuxPath)) {
+          return `${scheme}://file/${drvFsToWindowsPath(unc.linuxPath, '/')}`
+        }
+        return toVscodeRemoteWslUrl(scheme, unc.distro, unc.linuxPath)
+      }
+      if (isDrvFsPath(path)) {
+        return `${scheme}://file/${drvFsToWindowsPath(path, '/')}`
+      }
+    }
+  }
+
   return target.urlTemplate.replace('{path}', normalized)
 }
 

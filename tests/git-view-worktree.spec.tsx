@@ -116,26 +116,36 @@ function menuItem(label: string): HTMLButtonElement {
   return item
 }
 
-function openMoreSubmenu(container: HTMLElement, label: string): HTMLButtonElement[] {
+/** Every row of the portalled More Actions menu: pull / push, then the child
+ *  checkouts, then the linked worktrees — all FLAT rows of ONE card. */
+function moreRows(): HTMLButtonElement[] {
+  return [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button[role="menuitem"]')]
+}
+
+function openMoreMenu(container: HTMLElement): HTMLButtonElement[] {
   const trigger = container.querySelector<HTMLButtonElement>(`button[aria-label="${t('gitMoreActions')}"]`)
   if (trigger === null) throw new Error('More Actions button not found')
   act(() => { trigger.click() })
-  const parent = menuItem(label)
-  expect(parent.getAttribute('aria-haspopup')).toBe('menu')
-  act(() => { parent.click() })
-  return [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] [role="menu"] button[role="menuitem"]')]
+  // Flat rows only: a nested `submenu` card opens to the RIGHT — off-screen
+  // from a panel pinned to the window's right edge, where the row looked dead
+  // — and it also costs the card its viewport-fit scroll, so a 50-checkout
+  // container ran off the bottom of the screen. This is the regression guard.
+  expect(document.querySelector('[role="menu"] [aria-haspopup="menu"]')).toBeNull()
+  return moreRows()
 }
 
-async function chooseMoreOption(container: HTMLElement, submenu: string, label: string): Promise<void> {
-  const item = openMoreSubmenu(container, submenu).find(button => button.textContent?.trim() === label)
-  if (item === undefined) throw new Error(`submenu option not found: ${label}`)
+async function chooseMoreOption(container: HTMLElement, label: string): Promise<void> {
+  const item = openMoreMenu(container).find(button => button.textContent?.trim() === label)
+  if (item === undefined) throw new Error(`menu option not found: ${label}`)
   await act(async () => { item.click() })
   await flushEffects()
 }
 
 function branchButton(container: HTMLElement): HTMLButtonElement {
-  const button = container.querySelector<HTMLButtonElement>('[data-git-footer] button[aria-haspopup="menu"]')
-  if (button === null) throw new Error('footer branch button not found')
+  // The toolbar's repo chip is also a menu trigger, so target the branch one by
+  // its own hook rather than "the first aria-haspopup in the toolbar".
+  const button = container.querySelector<HTMLButtonElement>('[data-git-toolbar] [data-git-branch]')
+  if (button === null) throw new Error('toolbar branch button not found')
   return button
 }
 
@@ -160,7 +170,7 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
 
       // A clean primary + exactly one dirty linked checkout auto-selects the
       // linked checkout and loads every target-derived surface from it.
-      expect(branchButton(container).textContent).toBe('agent*')
+      expect(branchButton(container).textContent).toContain('agent*')
       expect(container.textContent).toContain('agent-change.ts')
       expect(container.textContent).toContain('Agent checkout commit')
       expect(container.textContent).not.toContain('Main checkout commit')
@@ -169,12 +179,14 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       // The repo / worktree pickers moved into More Actions (#944); the only
       // select left is the Graph section's own branch filter.
       expect([...container.querySelectorAll('select')]).toHaveLength(1)
-      const options = openMoreSubmenu(container, t('worktree'))
-      expect(options.map(button => button.textContent)).toEqual(['main · main (0)', 'agent · agent (1)'])
-      await act(async () => { options[0]!.click() })
+      // The worktree rows are flat rows of that one menu, under a heading row.
+      const worktreeRows = openMoreMenu(container)
+        .filter(button => (button.textContent ?? '').includes(' · '))
+      expect(worktreeRows.map(button => button.textContent)).toEqual(['main · main (0)', 'agent · agent (1)'])
+      await act(async () => { worktreeRows[0]!.click() })
       await flushEffects()
 
-      expect(branchButton(container).textContent).toBe('main*')
+      expect(branchButton(container).textContent).toContain('main*')
       expect(container.textContent).toContain('main-change.ts')
       expect(container.textContent).toContain('Main checkout commit')
       expect(container.textContent).not.toContain('Agent checkout commit')
@@ -217,7 +229,7 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       expect(loadMore).not.toBeUndefined()
       await act(async () => { loadMore!.click() })
 
-      await chooseMoreOption(container, t('worktree'), 'main · main (0)')
+      await chooseMoreOption(container, 'main · main (0)')
       expect(container.textContent).toContain('Main checkout commit 0')
 
       lateAgentPage.resolve(graphFor(AGENT, 99))
@@ -259,8 +271,10 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       mountGit(root, { scope: { sessionId: 'session', cwd: WS } })
       await flushEffects()
 
-      // The workspace container's child repositories retain their basename labels.
-      const repoOptions = openMoreSubmenu(container, t('gitRepository'))
+      // The workspace container's child repositories retain their basename
+      // labels, as flat rows of the same menu.
+      const repoOptions = openMoreMenu(container)
+        .filter(button => ['a', 'b'].includes(button.textContent?.trim() ?? ''))
       expect(repoOptions.map(button => button.textContent)).toEqual(['a', 'b'])
       const listingsBefore = worktrees.mock.calls.length
 
@@ -281,14 +295,57 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       // Explicit repo selection keeps that repo's PRIMARY checkout, even with
       // one dirty linked checkout available; every derived call targets it.
       expect(branch).toHaveBeenLastCalledWith(expect.objectContaining({ repoRoot: REPO_B }), REPO_B)
-      expect(openMoreSubmenu(container, t('worktree')).map(button => button.textContent))
+      expect(openMoreMenu(container)
+        .filter(button => (button.textContent ?? '').includes(' · '))
+        .map(button => button.textContent))
         .toEqual(['b-main · b (0)', 'b-agent · b-agent (2)'])
       act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
 
-      await chooseMoreOption(container, t('gitRepository'), 'a')
+      await chooseMoreOption(container, 'a')
       expect(branchButton(container).title).toBe(`${t('branch')}: a-main*`)
       expect(container.querySelector('[data-path="a-change.ts"]')).not.toBeNull()
       expect(container.querySelector('[data-path="b-change.ts"]')).toBeNull()
+    } finally {
+      act(() => { root.unmount() })
+      container.remove()
+    }
+  })
+
+  it('offers every child checkout as a flat row that really switches (#944 regression)', async () => {
+    // A monorepo container with more checkouts than fit on a screen: the rows
+    // used to live in a `submenu` card, which the host opens to the RIGHT —
+    // off-screen from a panel pinned to the window's right edge, so clicking
+    // "repository" did nothing at all and the list could not be scrolled.
+    const WS = 'C:/ws'
+    const REPOS = Array.from({ length: 60 }, (_, index) => `${WS}/r${String(index).padStart(2, '0')}`)
+    const status = vi.spyOn(api, 'gitStatus').mockImplementation(async (scope) => ({
+      isRepo: true,
+      branch: 'main',
+      entries: [],
+      root: scope.repoRoot ?? REPOS[0]!,
+      repositories: REPOS,
+    }))
+    vi.spyOn(api, 'gitWorktrees').mockResolvedValue([])
+    vi.spyOn(api, 'gitBranch').mockResolvedValue({ current: 'main', names: ['main'] })
+    vi.spyOn(api, 'gitGraph').mockResolvedValue(graphFor(undefined))
+
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root: Root = createRoot(container)
+    try {
+      mountGit(root, { scope: { sessionId: 'session', cwd: WS } })
+      await flushEffects()
+
+      const repoRows = openMoreMenu(container)
+        .filter(button => /^r\d\d$/.test(button.textContent?.trim() ?? ''))
+      expect(repoRows).toHaveLength(REPOS.length)
+      expect(repoRows.every(button => !button.disabled)).toBe(true)
+
+      await act(async () => { repoRows.at(-1)!.click() })
+      await flushEffects()
+
+      expect(status.mock.calls.at(-1)![0]).toMatchObject({ sessionId: 'session', cwd: WS, repoRoot: REPOS.at(-1) })
+      expect(branchButton(container).title).toBe(`${t('branch')}: main`)
     } finally {
       act(() => { root.unmount() })
       container.remove()
@@ -317,17 +374,17 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
     try {
       mountGit(root)
       await flushEffects()
-      expect(branchButton(container).textContent).toBe('agent*')
+      expect(branchButton(container).textContent).toContain('agent*')
 
       // A later inventory pass prefers the brand-new dirty checkout; the user
       // never chose a checkout, but the ONE automatic pass already ran.
-      const refresh = container.querySelector<HTMLButtonElement>(`[data-scm-section="changes"] button[aria-label="${t('refresh')}"]`)
+      const refresh = container.querySelector<HTMLButtonElement>(`[data-git-toolbar] button[aria-label="${t('refresh')}"]`)
       expect(refresh).not.toBeNull()
       await act(async () => { refresh!.click() })
       await flushEffects()
       expect(worktrees).toHaveBeenCalledTimes(2)
 
-      expect(branchButton(container).textContent).toBe('agent*')
+      expect(branchButton(container).textContent).toContain('agent*')
       expect(container.textContent).toContain('agent-change.ts')
       expect(container.textContent).not.toContain('agent-2-change.ts')
     } finally {
@@ -358,7 +415,7 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
 
       // Changes refresh lands while the mount's inventory pass is in flight.
       // Shared status already knows this is a repo, so the action is available.
-      const refresh = container.querySelector<HTMLButtonElement>(`[data-scm-section="changes"] button[aria-label="${t('refresh')}"]`)
+      const refresh = container.querySelector<HTMLButtonElement>(`[data-git-toolbar] button[aria-label="${t('refresh')}"]`)
       expect(refresh).not.toBeNull()
       expect(refresh!.disabled).toBe(false)
       await act(async () => { refresh!.click() })
@@ -469,9 +526,9 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       mountGit(root)
       await flushEffects()
 
-      // The entire footer branch button opens a menu of PLAIN branch names;
+      // The entire toolbar branch chip opens a menu of PLAIN branch names;
       // the dirty marker belongs only to the footer label, never its options.
-      expect(branchButton(container).textContent).toBe('main*')
+      expect(branchButton(container).textContent).toContain('main*')
       act(() => { branchButton(container).click() })
       expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['main', 'feature'])
       await act(async () => { menuItem('feature').click() })
@@ -484,7 +541,7 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       expect(input).not.toBeNull()
       // Branch/history failures are view-level, not the shared action channel.
       expect(banner!.parentElement).toBe(container.querySelector('[data-git-scroll]'))
-      expect(container.querySelector('[data-git-footer] [role="alert"]')).toBeNull()
+      expect(container.querySelector('[data-git-toolbar] [role="alert"]')).toBeNull()
       expect(banner!.compareDocumentPosition(input!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     } finally {
       act(() => { root.unmount() })
@@ -784,6 +841,25 @@ describe('GitLens (changes tab, git lens) change tree', () => {
       }
     })
 
+    it('sums the whole working tree into the always-visible header chip', async () => {
+      const { container, root } = makeRoot()
+      try {
+        await mountTree(container, root, [
+          { path: 'src/a.ts', xy: ' M', unstaged: { additions: 4, deletions: 2 } },
+          { path: 'docs/c.md', xy: 'M ', staged: { additions: 3, deletions: 3 } },
+        ])
+
+        // Unstaged 4/2 + staged 3/3 = 7/5, carried on the Changes header so the
+        // size of the change set is readable even with every band folded.
+        expect(counted(container, '[data-tree-totals] [data-lines="tree-total"]'))
+          .toEqual({ added: '7', deleted: '5', text: '+7−5' })
+        expect(container.querySelector('[data-tree-totals]')?.getAttribute('data-tree-totals')).toBe('2')
+      } finally {
+        act(() => { root.unmount() })
+        container.remove()
+      }
+    })
+
     it('marks a binary blob and invents no numbers for what git never diffs', async () => {
       const { container, root } = makeRoot()
       try {
@@ -801,6 +877,8 @@ describe('GitLens (changes tab, git lens) change tree', () => {
         expect(container.querySelector('[data-path="blob.bin"] [data-lines="count"]')).toBeNull()
         // ...and with nothing to sum, the band shows no total at all.
         expect(container.querySelector('[data-group="unstaged"] [data-lines="group"]')).toBeNull()
+        // The header chip follows the same rule: no numbers anywhere, no chip.
+        expect(container.querySelector('[data-tree-totals]')).toBeNull()
         // The count pill still reports how many files changed.
         expect(container.querySelector('[data-group="unstaged"] [data-count]')?.textContent).toBe('2')
       } finally {

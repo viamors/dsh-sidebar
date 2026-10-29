@@ -22,7 +22,7 @@
 
 | | |
 |---|---|
-| **🗂️ 文件管理**<br/>懒加载目录树、Git 变更着色、实时 watch 刷新、全局搜索、拖拽上传、多选批量操作、「打开方式」双源菜单。<br/><img alt="文件树（Git 着色）" src="./docs/screenshots/files-tree.png" /><br/><img alt="右键菜单：打开方式 + 打包下载" src="./docs/screenshots/files-menu-openwith.png" /> | **🌿 Git**<br/>Source Control（Merge / Staged / Changes 三组、带 Generate 的消息框、分支与同步底栏）+ 本轮 AI 改动视角合一，并在同一页签内给出**只读提交图**（泳道、分支与 tag 徽章、分支筛选、提交详情）。<br/><img alt="Git：变更与带 tag 的提交图" src="./docs/screenshots/changes-tree.png" /> |
+| **🗂️ 文件管理**<br/>懒加载目录树、Git 变更着色、实时 watch 刷新、全局搜索、拖拽上传、多选批量操作、「打开方式」双源菜单。<br/><img alt="文件树（Git 着色）" src="./docs/screenshots/files-tree.png" /><br/><img alt="右键菜单：打开方式 + 打包下载" src="./docs/screenshots/files-menu-openwith.png" /> | **🌿 Git**<br/>Source Control（Merge / Staged / Changes 三组、带 Generate 的消息框、顶部仓库/分支/同步 chip 工具栏）+ 本轮 AI 改动视角合一，并在同一页签内给出**只读提交图**（泳道、分支与 tag 徽章、分支筛选、提交详情）。<br/><img alt="Git：变更与带 tag 的提交图" src="./docs/screenshots/changes-tree.png" /> |
 | **📝 可编辑编辑器与预览**<br/>可编辑的 CodeMirror（官方预览是只读）、Markdown + Mermaid + 浮动目录、HTML 沙箱预览、`.jsonl` 记录卡片、超大文件分页预览、传输无大小上限。<br/><img alt="Markdown + Mermaid 预览" src="https://github.com/user-attachments/assets/fe0e5182-55bb-45cc-b98b-a2877c2bdd38" /> | **🧩 任务管理**<br/>子代理拓扑实时预览（工作流图 / 树双模式）+ 后台任务清单：退出码、实时输出、强制终止。<br/><img alt="任务页：子代理拓扑" src="https://github.com/user-attachments/assets/dcd8ed2f-59fa-405b-937b-2d250f5034dd" /> |
 | **💬 侧边对话（beta）**<br/>Codex 风格侧边线程：继承主会话完整上下文独立运行、实时推送、排队可见可撤回、每个线程独立选模型、一键提升为顶层会话。<br/><img alt="侧边对话" src="https://github.com/user-attachments/assets/3a338c36-f5de-4000-95f3-4b1cd04f60fc" /> | **🖥️ 底部工作台**<br/>自绘底部面板与原生右侧栏同时展开：拖拽分栏、多终端页签、按会话持久化布局。<br/><img alt="双工作台" src="https://github.com/user-attachments/assets/dfdb875e-a1a8-4d4b-8340-353736b1708f" /> |
 
@@ -93,6 +93,24 @@ dsh plugin --profile web add dsh-better-sidebar@latest
 | 升级后设置页的值去哪了 | DSH 0.1.7 起偏好写在 profile 里本插件的挂载行上（默认 entry id `better-sidebar`），插件首次启动会把旧 `settings.yaml` 里的配置一次性回迁，不会覆盖新设的值。 |
 | 终端无法使用 | 终端由 **DSH 自身**提供（本插件不自带 PTY），请查 DSH 侧文档；底部终端显示「宿主未提供终端能力」= 这个部署没挂终端控制器。 |
 | 提示 `dsh: command not found` | 先安装 DSH；或用 `npx -y --package @deepseek-ai/dsh@0.2.1-rc.1 dsh plugin --profile web add dsh-better-sidebar@0.29.0`。 |
+
+</details>
+
+<details>
+<summary><b>🪟 Windows + WSL2</b></summary>
+
+在 Windows 宿主上运行 DSH、直接打开**位于 WSL2 发行版内部**的项目：文件树、Git 状态、diff、预览与「打开方式」全部作用于发行版自己的文件。Git 有意**在发行版内部执行**（`wsl.exe -d <distro> --exec git -C <linuxPath>`）——走 9P 挂载的 Windows 版 git 会报出大量虚假修改：POSIX 权限位 `100755` 变 `100644`、符号链接失效、CRLF/LF 转换。
+
+**要求**——Windows 10 1903+ 或 Windows 11；至少一个 WSL2 发行版；`wsl.exe` 在 `PATH` 上；**发行版内部装好 git**（只有 Windows 侧 git 的配置对这些目录不生效）。
+
+**无需任何配置。** 会话工作目录是 Linux 路径时自动识别——发行版侧写法（`/opt/app`、`/home/me/repo`）与宿主侧 UNC 写法（`\\wsl.localhost\Ubuntu\opt\app`，或旧的 `\\wsl$\Ubuntu\…`）都支持。`/mnt/<盘符>/…` 会映射回 Windows 盘（`/mnt/d/work` → `D:\work`），放在 Windows 盘上的项目行为与之前完全一致。
+
+**已知限制**
+
+- WSL 目录内部的变更检测按 2s 轮询发行版（同时最多 16 个目录）：外部改动最长约 2s 才出现；不改变条目列表的原地改写不会被上报。
+- 只支持 `\\wsl.localhost\`（以及旧的 `\\wsl$\`）UNC 根。
+- Git 按设计在发行版内部执行，因此只有 Windows 侧 git 的配置无法用于 WSL 目录。
+- POSIX 路径只有在真实文件系统根下（`/opt`、`/home`、`/tmp`、`/workspace` 等）才被当作 WSL 位置，其它绝对 Linux 路径保持原样。
 
 </details>
 
@@ -241,7 +259,7 @@ make mount        # 真机挂载冒烟：build + pack → pnpm test:mount
 
 **架构**：单 npm 包、host/client 双半结构——host（`src/index.ts`）：`/sidebar/api/*` JSON API、媒体 / HTML 预览 / 上传路由与两条 WebSocket；client（`src/client/index.tsx`）：原生右侧栏 tab + 底部工作台；状态按会话持久化 localStorage。仓库工作规范见 [`AGENTS.md`](./AGENTS.md)。
 
-Windows / Linux / macOS 三平台适配（macOS 日常验证，其余经单元测试与 Windows CI 覆盖）；无原生依赖，构建只需 Node ≥ 20 + pnpm ≥ 10。
+Windows / Linux / macOS 三平台适配，含 **Windows + WSL2** 工作区（见上方 Windows + WSL2 一节；macOS 日常验证，其余经单元测试与 Windows CI 覆盖）；无原生依赖，构建只需 Node ≥ 20 + pnpm ≥ 10。
 
 </details>
 

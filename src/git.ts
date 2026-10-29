@@ -15,6 +15,8 @@ import { readdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
+import { isWslUncPath, parseWslUncPath, linuxPathToWslUnc, normalizeWslUncForWindows, windowsToDrvFsPath } from './wsl-path.ts'
+import { decodeWslOutput } from './wsl-env.ts'
 
 /** A parsed porcelain status entry (v1 XY convention). */
 export interface GitStatusEntry {
@@ -369,6 +371,10 @@ export function refusedRepository(message: string): string | undefined {
  *  stable, which is what makes the refused path above parseable. */
 const GIT_ENV = { GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' } as const
 
+/** Flags whose NEXT argument is free text, not a path: never rewritten when
+ *  the command is delegated to the distro's git. */
+const GIT_VALUE_FLAGS = new Set(['-m', '--message', '-F', '--file', '-S', '--grep'])
+
 /**
  * Hard ceiling on one git command's stdout. A runaway command — a whole-repo
  * `diff` with no pathspec (the shape a repository with an unignored nested
@@ -412,29 +418,81 @@ function spawnGit(
   safe: readonly string[],
   options: RunGitOptions = {},
 ): Promise<string> {
+  const isWsl = process.platform === 'win32' && isWslUncPath(cwd)
+  const parsedWsl = isWsl ? parseWslUncPath(cwd) : undefined
+  const effectiveCwd = parsedWsl !== undefined ? parsedWsl.linuxPath : cwd
+
+  const safeArgs = safe.flatMap(dir => {
+    const effectiveDir = (isWsl && isWslUncPath(dir))
+      ? (parseWslUncPath(dir)?.linuxPath ?? dir)
+      : dir
+    return ['-c', `safe.directory=${effectiveDir}`]
+  })
+
+  // When delegating to WSL git on Windows, only arguments that are actually
+  // spelled as host paths are translated. A blanket `\`→`/` rewrite is wrong
+  // twice over: `commit -m "fix C:\temp handling"` would be committed as
+  // `fix C:/temp handling`, and a Linux file legitimately named `a\b.ts` could
+  // never be staged. Values belonging to a message/file flag are left alone
+  // even when they look like a path.
+  const normalizedArgs = isWsl
+    ? args.map((arg, index) => {
+        const previous = args[index - 1]
+        if (previous !== undefined && GIT_VALUE_FLAGS.has(previous)) return arg
+        if (arg.startsWith('--message=') || arg.startsWith('--file=')) return arg
+        if (isWslUncPath(arg)) return parseWslUncPath(arg)?.linuxPath ?? arg
+        // A drive-rooted path is a DrvFs location inside the distro; git there
+        // can only open `/mnt/<drive>/...`.
+        if (/^[a-zA-Z]:[\\/]/.test(arg)) return windowsToDrvFsPath(arg)
+        return arg
+      })
+    : args
+
   const full = [
-    '-C', cwd, '--no-pager', '-c', 'color.ui=false',
+    '-C', effectiveCwd, '--no-pager', '-c', 'color.ui=false',
     // `core.quotePath=false`: emit paths verbatim instead of C-quoting them
     // (git's default turns a CJK/space path into an octal-escaped, quoted
     // string, and every diff surface renders that string as the file name).
     // The `-z`-framed porcelain callers are unaffected: git never quotes
     // NUL-framed output.
     '-c', 'core.quotePath=false',
-    ...safe.flatMap(dir => ['-c', `safe.directory=${dir}`]),
-    ...args,
+    ...safeArgs,
+    ...normalizedArgs,
   ]
+
+  const spawnCmd = isWsl && parsedWsl !== undefined ? 'wsl.exe' : 'git'
+  // The Windows environment is NOT inherited into the distro, so the two
+  // settings every git call relies on have to ride in the argv: without
+  // `LC_ALL=C` the "dubious ownership" refusal arrives localized (the retry
+  // never matches it and the panel says "not a git repository"), and without
+  // `GIT_OPTIONAL_LOCKS=0` a read-only panel takes `index.lock` away from the
+  // user's own terminal. `timeout` is the safety net the Windows kill cannot
+  // provide: killing `wsl.exe` leaves the distro-side git running.
+  const timeoutSeconds = String(Math.max(1, Math.ceil(timeoutMs / 1000)))
+  const spawnFull = isWsl && parsedWsl !== undefined
+    ? [
+        '-d', parsedWsl.distro, '--exec',
+        'timeout', '-s', 'KILL', timeoutSeconds,
+        'env', 'LC_ALL=C', 'GIT_OPTIONAL_LOCKS=0',
+        'git', ...full,
+      ]
+    : full
+
   const maxBytes = options.maxBytes ?? GIT_OUTPUT_MAX_BYTES
   const maxNulFields = options.maxNulFields
   return new Promise<string>((resolvePromise, reject) => {
-    const child = spawn('git', full, {
+    const child = spawn(spawnCmd, spawnFull, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      env: { ...process.env, ...GIT_ENV },
+      env: isWsl ? process.env : { ...process.env, ...GIT_ENV },
     })
     let stdout = ''
     let outBytes = 0
     let outFields = 0
-    let stderr = ''
+    // Collected as bytes, not as text: `wsl.exe`'s own diagnostics (missing
+    // distro, WSL disabled) are UTF-16LE and must be decoded once the whole
+    // message is in hand — a chunk boundary can split a code unit.
+    const errChunks: Buffer[] = []
     let errBytes = 0
     // Set when the caller's row cap stopped production: the partial answer is
     // then the answer, and the killed child's non-zero exit must not be
@@ -490,7 +548,7 @@ function spawnGit(
     })
     child.stderr.on('data', (chunk: Buffer) => {
       if (byteCapped) return
-      stderr += chunk.toString('utf8')
+      errChunks.push(chunk)
       errBytes += chunk.length
       // stderr shares the byte budget: a command whose DIAGNOSTICS stream
       // past the cap is as able to kill the host via string length as one
@@ -514,7 +572,11 @@ function spawnGit(
       if (fieldCapped || code === 0) {
         resolvePromise(stdout)
       } else {
-        reject(new GitCommandError(stderr.trim() || `git exited with ${String(code)}`, 'git-error', args.join(' ')))
+        const raw = Buffer.concat(errChunks)
+        // git's own stderr is UTF-8; only the `wsl.exe` wrapper speaks
+        // UTF-16LE, so the decode is gated on the delegation.
+        const message = isWsl ? decodeWslOutput(raw) : raw.toString('utf8')
+        reject(new GitCommandError(message.trim() || `git exited with ${String(code)}`, 'git-error', args.join(' ')))
       }
     })
   })
@@ -678,7 +740,14 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 /** The repository top level containing `cwd` (`git rev-parse --show-toplevel`). */
 async function directRepoRoot(cwd: string): Promise<string> {
   const out = await runGit(cwd, ['rev-parse', '--show-toplevel'], DISCOVERY_TIMEOUT_MS)
-  return out.trim()
+  const trimmed = out.trim()
+  if (process.platform === 'win32' && isWslUncPath(cwd)) {
+    const parsed = parseWslUncPath(cwd)
+    if (parsed !== undefined && trimmed.startsWith('/')) {
+      return normalizeWslUncForWindows(linuxPathToWslUnc(trimmed, parsed.distro))
+    }
+  }
+  return trimmed
 }
 
 /** Discover the current repository plus child repositories nested up to
@@ -742,7 +811,9 @@ async function discoverRepoRoots(cwd: string): Promise<string[]> {
         // scanned root and the git-reported root look like two repositories.
         // Unresolvable names keep the joined path.
         const resolved = await realpath(dir).catch(() => dir)
-        const root = process.platform === 'win32' ? resolved.replaceAll('\\', '/') : resolved
+        const root = (process.platform === 'win32' && isWslUncPath(resolved))
+          ? normalizeWslUncForWindows(resolved)
+          : (process.platform === 'win32' ? resolved.replaceAll('\\', '/') : resolved)
         if (!roots.some(existing => pathIdentity(existing) === pathIdentity(root))) roots.push(root)
       }
       for (const name of subdirs.sort((left, right) => left.localeCompare(right))) next.push(join(dir, name))
@@ -776,8 +847,16 @@ export async function currentBranch(cwd: string): Promise<string> {
  * directory shared by linked worktrees). `git am` also uses rebase-apply, but
  * only a rebase creates its `rebasing` marker. */
 async function currentOperation(cwd: string): Promise<GitStatusResult['operation']> {
-  const gitDir = (await runGit(cwd, ['rev-parse', '--absolute-git-dir'])).trim()
-  const names = await readdir(gitDir)
+  let rawGitDir: string
+  try {
+    rawGitDir = (await runGit(cwd, ['rev-parse', '--absolute-git-dir'])).trim()
+  } catch {
+    return undefined
+  }
+  const gitDir = (process.platform === 'win32' && isWslUncPath(cwd))
+    ? normalizeWslUncForWindows(linuxPathToWslUnc(rawGitDir, parseWslUncPath(cwd)!.distro))
+    : rawGitDir
+  const names = await readdir(gitDir).catch((): string[] => [])
   if (names.includes('rebase-merge')
     || (names.includes('rebase-apply') && (await readdir(join(gitDir, 'rebase-apply')).catch((): string[] => [])).includes('rebasing'))) {
     return 'rebase'
@@ -930,8 +1009,10 @@ export async function status(cwd: string, selected?: string): Promise<GitStatusR
 
 /** Platform-aware identity used only for comparing absolute checkout roots. */
 function pathIdentity(path: string): string {
-  const absolute = resolve(path).replace(/[\\/]+$/, '')
-  return process.platform === 'win32' ? absolute.toLowerCase() : absolute
+  const norm = (process.platform === 'win32' && isWslUncPath(path))
+    ? normalizeWslUncForWindows(path)
+    : resolve(path).replace(/[\\/]+$/, '')
+  return process.platform === 'win32' ? norm.toLowerCase() : norm
 }
 
 /** Whether the current Git binary supports NUL-framed `worktree list` output.
@@ -955,7 +1036,17 @@ async function listedWorktrees(cwd: string): Promise<GitWorktreeRecord[]> {
       raw = await runGit(cwd, ['worktree', 'list', '--porcelain'])
     }
   }
-  return parseWorktreeList(raw).filter(entry => !entry.prunable)
+  const isWsl = process.platform === 'win32' && isWslUncPath(cwd)
+  const parsedDistro = isWsl ? parseWslUncPath(cwd)?.distro : undefined
+  const entries = parseWorktreeList(raw).filter(entry => !entry.prunable)
+  if (parsedDistro !== undefined) {
+    for (const entry of entries) {
+      if (entry.path.startsWith('/')) {
+        entry.path = normalizeWslUncForWindows(linuxPathToWslUnc(entry.path, parsedDistro))
+      }
+    }
+  }
+  return entries
 }
 
 /**
@@ -1067,7 +1158,19 @@ export async function branches(cwd: string, selected?: string): Promise<{ curren
  *  the worktree changes and `--work-tree=…` redirected the checkout. Same
  *  guard as show / commitDiff / revert / cherryPick (4100e16). */
 export async function checkout(cwd: string, branch: string, selected?: string): Promise<void> {
-  await runGit(await repoRoot(cwd, selected), ['checkout', '--end-of-options', branch])
+  if (branch.startsWith('-')) {
+    throw new GitCommandError(`invalid branch name: ${branch}`, 'invalid-branch', 'checkout')
+  }
+  const root = await repoRoot(cwd, selected)
+  try {
+    await runGit(root, ['checkout', '--end-of-options', branch])
+  } catch (error) {
+    if (error instanceof GitCommandError && error.message.includes('--end-of-options')) {
+      await runGit(root, ['checkout', branch])
+      return
+    }
+    throw error
+  }
 }
 
 /** All refs plus HEAD in child-before-parent order for graph lanes, pageable

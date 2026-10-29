@@ -60,29 +60,47 @@
 .scmHeader:hover .scmActions, .scmHeader:focus-within .scmActions { opacity: 1; }
 @media (hover: none) { .scmActions { opacity: 1; } }
 
-/* Docked by the flex column above (a sibling of `.gitScroll`), plus sticky so
-   it also survives the case where the host tab body itself scrolls the whole
-   tab — the branch control must never leave the bottom of the pane.
-   NO z-index: in a floating window the host's resize grip is the last child
-   at `z-index: auto`, so a stacking footer paints over the bottom-right
-   corner and makes the grip un-hittable. Sticky (positioned) already paints
-   above the scrolled rows. */
-.gitFooter { flex: none; min-width: 0; position: sticky; bottom: 0; border-top: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-base); }
-.footerRow { display: flex; align-items: center; min-width: 0; min-height: 28px; }
+/* ── Pill toolbar (docked at the top) ──────────────────────────────────── */
 
-/* A failed remote op reports above the branch row and git's stderr can be long:
+/* One row of chips over the scrolling body — repo · branch (+N −M) · upstream
+   — then the action cluster on the right. A sibling of `.gitScroll` so it
+   stays put while the change list scrolls, and a plain flex row (no z-index):
+   in a floating window the host's resize grip is the last child at
+   `z-index: auto`, so a stacking toolbar would paint over the bottom-right
+   corner and make the grip un-hittable. */
+.gitToolbar { flex: none; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+.toolbarRow { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+/* The chips shrink and ellipsize instead of pushing the cluster off-screen:
+   the branch name can be long, and a narrow panel must still show every
+   action. */
+.toolbarPills { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.toolbarActions { flex: none; display: flex; align-items: center; gap: 2px; }
+
+/* A chip: outlined pill, label + chevron (+ the line totals for the branch
+   one). `max-width: 100%` keeps a single long upstream ref from widening the
+   row; the inner spans ellipsize. */
+.pill { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; height: 24px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxxs-11); cursor: pointer; }
+.pill:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.pill:focus-visible { outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent); outline-offset: -1px; }
+.pill:disabled { opacity: 0.45; cursor: default; }
+.pill > svg { flex: none; }
+.pill > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The chip's category word ("Branch") is the quiet part; the value and the
+   numbers carry the weight. */
+.pillLabel { flex: none; color: var(--dsw-alias-label-tertiary); }
+.pillChevron { flex: none; opacity: 0.65; }
+.pillCounts { flex: none; display: inline-flex; align-items: center; }
+.pillMenu { display: flex; min-width: 0; max-width: 100%; }
+.pillMenu > * { min-width: 0; }
+
+/* A failed remote op reports under the toolbar and git's stderr can be long:
    it keeps its own height (never truncated) but gets a dismiss control instead
-   of living in the docked footer until the next action. */
-.actionError { display: flex; align-items: flex-start; gap: 6px; white-space: normal; }
+   of living in the docked row until the next action. */
+.actionError { display: flex; align-items: flex-start; gap: 6px; white-space: normal; margin: 0 8px 6px; }
 .actionErrorText { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.branchMenu { display: flex; flex: 1; min-width: 0; }
-.branchButton, .syncButton { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 28px; padding: 3px 8px; border: none; background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxxs-11); cursor: pointer; }
-.branchButton { flex: 1; text-align: left; }
-.syncButton { max-width: 55%; }
-.branchButton svg, .syncButton svg { flex: none; }
-.branchButton span, .syncButton span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.branchButton:hover:not(:disabled), .syncButton:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
-.branchButton:disabled, .syncButton:disabled { opacity: 0.45; cursor: default; }
+/* No height cap here on purpose: the host's own `.scrollable` card rule
+   (viewport-fit max-height + a scrolling `.viewport`) is what a long row list
+   needs, and it only applies while no row carries a `submenu`. */
 
 /* ── Change groups (one directory tree each) ───────────────────────────── */
 
@@ -237,6 +255,26 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The Changes header's working-tree summary: always visible, unlike the
+   hover-revealed actions beside it, and capped so a huge count set can never
+   push the actions out of the header (40% of the row leaves the disclosure and
+   the three buttons their room; the counts ellipsize instead of overflowing). */
+.treeTotals {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+/* The pair is the chip's only shrinkable content, so the cap above costs the
+   counts characters (`+12… −1…`) rather than the actions their place. */
+.treeTotals > .lineCounts { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.treeTotals > .lineCounts > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 /* The stand-ins for "no numbers exist": a binary change and an untracked (new)
    file. Quiet tertiary ink — they are a state, not a measurement. */
 .lineNote {
@@ -257,6 +295,44 @@
 @media (hover: none) {
   .row:not(:hover):not(:focus-within) .rowAction { opacity: 1; }
 }
+
+/* ── File filter (inside Changes) ───────────────────────────────────────── */
+
+/* A compact frame above the groups: typing narrows the list in place, so it
+   sits where the rows begin rather than in the header's action cluster. Named
+   `gitFilterRow` because SessionLens owns plain `.filterRow` further down (its
+   `padding: 6px 12px` / `flex-wrap: wrap` used to win here by source order). */
+.gitFilterRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 6px;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 0 2px 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+}
+.gitFilterRow:focus-within { border-color: var(--dsw-alias-state-business-primary); }
+
+.filterIcon { flex: none; display: inline-flex; }
+
+.filterInput {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12);
+  outline: none;
+}
+.filterInput::placeholder { color: var(--dsw-alias-label-dimmed); }
+
+.filterClear { flex: none; width: 20px; height: 20px; }
 
 /* ── Message draft (inside Changes) ─────────────────────────────────────── */
 

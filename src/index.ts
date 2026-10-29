@@ -9,6 +9,7 @@
  * All operations are conversation-scoped: requests carry a sessionId and the
  * session's authoritative cwd comes from the session store.
  */
+import { existsSync } from 'node:fs'
 import { open, readFile, stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, sep } from 'node:path'
 import type { Stats } from 'node:fs'
@@ -28,6 +29,8 @@ import {
 } from './config.ts'
 import { createProbeGate, listDirectory, messageOf, parentOf, requireAbsolute, rootLabel, type SidebarFsEntry } from './fs-tree.ts'
 import { resolveSessionPath } from './session-path.ts'
+import { bridgeToWindowsHostPath, isWslUncPath, normalizeWslUncForWindows } from './wsl-path.ts'
+import { getDefaultWslDistro } from './wsl-env.ts'
 import { createWorkspaceFile, mkdirWorkspaceEntry, renameWorkspaceEntry, removeWorkspaceEntry, writeWorkspaceText, writeWorkspaceUpload } from './fs-operations.ts'
 import { ensureWorkspacePath } from './path-security.ts'
 import { searchFiles } from './fs-search.ts'
@@ -198,6 +201,25 @@ async function storedHeaderCwdOf(ctx: Context, sessionId: string): Promise<strin
 }
 
 /**
+ * A session's working directory in a spelling THIS host can read.
+ *
+ * A WSL session reports a POSIX cwd (`/opt/...`); on a win32 host that has to
+ * become the `\\wsl.localhost\<distro>\...` UNC form, or every read under it
+ * fails. Everything else passes through untouched — in particular a POSIX path
+ * that is NOT a WSL location keeps its own spelling, because `path.resolve()`
+ * would glue the host process's drive onto it (`/attached-cwd` →
+ * `C:\attached-cwd`) and invent a directory nobody asked for.
+ */
+function hostReadableCwd(cwd: string): string {
+  if (process.platform !== 'win32') return cwd
+  // The `exists` probe keeps a REAL drive-rooted folder (`C:\opt\msys64`) in
+  // its own spelling: only a path the filesystem cannot find can be the
+  // `path.resolve()` damage this bridge repairs.
+  const bridged = bridgeToWindowsHostPath(cwd, undefined, { exists: existsSync })
+  return isWslUncPath(bridged) ? normalizeWslUncForWindows(bridged) : bridged
+}
+
+/**
  * Resolve the directory a session's file/Git routes are rooted at.
  *
  * An attached session answers from the host's committed working directory
@@ -218,7 +240,7 @@ async function sessionCwdOf(ctx: Context, sessionId: string, clientCwd?: string)
   // committed value tracks `cd` and wins whenever it is available.
   if (session !== undefined) {
     const cwd = ctx.get('workingDirectory')?.get(session) ?? session.header.cwd
-    if (cwd !== undefined && cwd !== '') return cwd
+    if (cwd !== undefined && cwd !== '') return hostReadableCwd(cwd)
   }
   const stored = await storedHeaderCwdOf(ctx, sessionId)
   if (stored !== undefined) {
@@ -1408,6 +1430,13 @@ async function importLegacyPrefs(
  */
 export function apply(ctx: Context, config?: SidebarConfig): void {
   const resolved = resolveSidebarConfig(config)
+  // Resolve the distro this machine actually runs before the first request
+  // needs it. Every POSIX→host bridge is synchronous and can only fall back to
+  // a compiled default, so without this kick-off a Debian or Ubuntu-22.04
+  // session would be bridged onto `\\wsl.localhost\Ubuntu\...` and fail with
+  // ENOENT. Detection is cached and fails soft, so a machine without WSL just
+  // keeps the default.
+  if (process.platform === 'win32') void getDefaultWslDistro().catch(() => undefined)
   // Connection owns both deployment trust and authentication; never infer or
   // bypass its policy from invocation flags or a copied trust list.
   const fence = (req: SidebarHttpRequest): boolean => ctx.connection.requestRejection(req) === undefined

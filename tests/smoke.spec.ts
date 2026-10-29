@@ -837,12 +837,12 @@ describe('session cwd resolution over the API route', () => {
 
   it('falls back to the client hint when the host cannot stat the session', async () => {
     const absent = mount()
-    expect(await invoke(absent, 'session.cwd', { sessionId: 'wd-no-stat', cwd: '/tmp/hint-absent' })).toMatchObject({
-      ok: true, value: { cwd: resolvePath('/tmp/hint-absent') },
+    expect(await invoke(absent, 'session.cwd', { sessionId: 'wd-no-stat', cwd: '/dsh-hint-absent' })).toMatchObject({
+      ok: true, value: { cwd: resolvePath('/dsh-hint-absent') },
     })
     const failing = mount({ sessionPersistence: { stat: async () => { throw new Error('stored artifact unreadable') } } })
-    expect(await invoke(failing, 'session.cwd', { sessionId: 'wd-stat-error', cwd: '/tmp/hint-failing' })).toMatchObject({
-      ok: true, value: { cwd: resolvePath('/tmp/hint-failing') },
+    expect(await invoke(failing, 'session.cwd', { sessionId: 'wd-stat-error', cwd: '/dsh-hint-failing' })).toMatchObject({
+      ok: true, value: { cwd: resolvePath('/dsh-hint-failing') },
     })
   })
 
@@ -890,11 +890,11 @@ describe('session cwd resolution over the API route', () => {
 
   it('uses the client summary cwd while the session is detached', async () => {
     const route = mount()
-    const result = await invoke(route, 'session.cwd', { sessionId: 's-detached', cwd: '/tmp/summary-cwd' })
+    const result = await invoke(route, 'session.cwd', { sessionId: 's-detached', cwd: '/dsh-summary-cwd' })
     expect(result.ok).toBe(true)
     // The summary cwd passes through requireAbsolute (platform resolve), so
     // the expectation follows the platform's own normalization.
-    expect(result.value?.cwd).toBe(resolvePath('/tmp/summary-cwd'))
+    expect(result.value?.cwd).toBe(resolvePath('/dsh-summary-cwd'))
   })
 
   it('falls back to the process cwd with no summary cwd', async () => {
@@ -984,7 +984,7 @@ describe('session cwd resolution over the API route', () => {
         get: (id) => id === 's-attached' ? { header: { cwd: '/attached-cwd' } } : undefined,
       },
     })
-    const result = await invoke(route, 'session.cwd', { sessionId: 's-attached', cwd: '/tmp/summary-cwd' })
+    const result = await invoke(route, 'session.cwd', { sessionId: 's-attached', cwd: '/dsh-summary-cwd' })
     expect(result.ok).toBe(true)
     expect(result.value?.cwd).toBe('/attached-cwd')
   })

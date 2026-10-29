@@ -51,6 +51,20 @@ describe('revealCommand', () => {
       args: ['/select,C:\\a\\b.txt'],
     })
   })
+
+  it('win32: maps DrvFs /mnt/<drive> paths to local Windows drive format for Explorer', () => {
+    expect(revealCommand('/mnt/d/AIWorkspace/DSH/file.ts', 'win32')).toEqual({
+      command: 'explorer.exe',
+      args: ['/select,D:\\AIWorkspace\\DSH\\file.ts'],
+    })
+  })
+
+  it('win32: normalizes WSL UNC forward slashes to canonical backslashes for Explorer', () => {
+    expect(revealCommand('//wsl.localhost/Ubuntu/home/user/file.ts', 'win32')).toEqual({
+      command: 'explorer.exe',
+      args: ['/select,\\\\wsl.localhost\\Ubuntu\\home\\user\\file.ts'],
+    })
+  })
 })
 
 describe('urlCommands', () => {
@@ -136,8 +150,38 @@ describe('wslRemoteEditorUrl', () => {
       .toBe('zed://file//home/u/f.ts')
   })
 
-  it('rejects a Remote-WSL conversion when the distro name is unavailable', () => {
-    expect(() => wslRemoteEditorUrl('vscode://file//home/u/f.ts', '')).toThrow(SidebarError)
+  it('converts WSL UNC URLs to Remote-WSL URLs without requiring WSL_DISTRO_NAME', () => {
+    expect(wslRemoteEditorUrl('vscode://file//wsl.localhost/Ubuntu/home/u/f.ts', ''))
+      .toBe('vscode://vscode-remote/wsl+Ubuntu/home/u/f.ts')
+    expect(wslRemoteEditorUrl('cursor://file//wsl$/Debian/var/log/syslog', ''))
+      .toBe('cursor://vscode-remote/wsl+Debian/var/log/syslog')
+  })
+
+  it('maps WSL UNC pointing to /mnt/<drive> back to Windows drive file URL', () => {
+    expect(wslRemoteEditorUrl('vscode://file//wsl.localhost/Ubuntu/mnt/c/Users/alice/f.ts', ''))
+      .toBe('vscode://file/C:/Users/alice/f.ts')
+  })
+
+  it('leaves Windows drive file URLs unchanged', () => {
+    expect(wslRemoteEditorUrl('vscode://file/C:/Users/alice/f.ts', ''))
+      .toBe('vscode://file/C:/Users/alice/f.ts')
+  })
+
+  it('rejects a Remote-WSL conversion when a Linux host has no distro name', () => {
+    expect(() => wslRemoteEditorUrl('vscode://file//home/u/f.ts', '', 'linux')).toThrow(SidebarError)
+  })
+
+  it('bridges a bare POSIX path onto the default distro on a Windows host', () => {
+    // A Windows host has no WSL_DISTRO_NAME; the path is bridged to the
+    // default distro's UNC instead of throwing, so the editor still opens the
+    // file in its Remote-WSL workspace.
+    expect(wslRemoteEditorUrl('vscode://file//opt/app/f.ts', '', 'win32'))
+      .toMatch(/^vscode:\/\/vscode-remote\/wsl\+[^/]+\/opt\/app\/f\.ts$/)
+  })
+
+  it('prefers an explicit distro name over the default one', () => {
+    expect(wslRemoteEditorUrl('vscode://file//opt/app/f.ts', 'Debian', 'win32'))
+      .toBe('vscode://vscode-remote/wsl+Debian/opt/app/f.ts')
   })
 })
 

@@ -22,7 +22,7 @@
 
 | | |
 |---|---|
-| **🗂️ File Management**<br/>Lazy-loading tree, git status colors, live directory watch, global search, drag-and-drop upload, multi-select batch actions, dual-source "Open with" menu.<br/><img alt="File tree with git colors" src="./docs/screenshots/files-tree.png" /><br/><img alt="Context menu: Open with + Zip and download" src="./docs/screenshots/files-menu-openwith.png" /> | **🌿 Git**<br/>Source Control (Merge / Staged / Changes groups, message box with Generate, branch + sync footer) plus a this-session AI-changes lens, with a **read-only commit graph** (lanes, branch and tag badges, branch filter, commit details) in one tab.<br/><img alt="Git: changes and commit graph with tags" src="./docs/screenshots/changes-tree.png" /> |
+| **🗂️ File Management**<br/>Lazy-loading tree, git status colors, live directory watch, global search, drag-and-drop upload, multi-select batch actions, dual-source "Open with" menu.<br/><img alt="File tree with git colors" src="./docs/screenshots/files-tree.png" /><br/><img alt="Context menu: Open with + Zip and download" src="./docs/screenshots/files-menu-openwith.png" /> | **🌿 Git**<br/>Source Control (Merge / Staged / Changes groups, message box with Generate, top chip row for repo / branch / sync) plus a this-session AI-changes lens, with a **read-only commit graph** (lanes, branch and tag badges, branch filter, commit details) in one tab.<br/><img alt="Git: changes and commit graph with tags" src="./docs/screenshots/changes-tree.png" /> |
 | **📝 Editable Editor & Previews**<br/>An editable CodeMirror (the stock preview is read-only), Markdown + Mermaid + floating outline, sandboxed HTML preview, `.jsonl` record cards, paged preview for huge files, streaming transfers with no size caps.<br/><img alt="Markdown + Mermaid preview" src="https://github.com/user-attachments/assets/fe0e5182-55bb-45cc-b98b-a2877c2bdd38" /> | **🧩 Tasks**<br/>Live subagent topology (workflow graph / tree modes) + background task list: exit codes, live output, force-kill.<br/><img alt="Tasks: subagent topology" src="https://github.com/user-attachments/assets/dcd8ed2f-59fa-405b-937b-2d250f5034dd" /> |
 | **💬 Side Chat (beta)**<br/>Codex-style side threads: inherit the full parent context and run independently, realtime push, visible & revocable queue, per-thread model selection, one-click promotion to a top-level session.<br/><img alt="Side Chat" src="https://github.com/user-attachments/assets/3a338c36-f5de-4000-95f3-4b1cd04f60fc" /> | **🖥️ Bottom Workbench**<br/>A self-drawn bottom panel that coexists with the native right sidebar: drag-to-split panes, multiple terminal tabs, per-session persisted layout.<br/><img alt="Dual workbench" src="https://github.com/user-attachments/assets/dfdb875e-a1a8-4d4b-8340-353736b1708f" /> |
 
@@ -93,6 +93,24 @@ If something fails, check the FAQ table in https://github.com/omdsh-dev/DSH-bett
 | Settings values gone after upgrade | Since DSH 0.1.7, preferences live on this plugin's mount row in the profile (default entry id `better-sidebar`). The plugin migrates your old `settings.yaml` values once on first start and never overwrites newer values. |
 | Terminal unavailable | Terminals are provided by **DSH itself** (this plugin ships no PTY) — see DSH docs; "host provides no terminal capability" in the bottom terminal means this deployment has no terminal controller mounted. |
 | `dsh: command not found` | Install DSH first; or use `npx -y --package @deepseek-ai/dsh@0.2.1-rc.1 dsh plugin --profile web add dsh-better-sidebar@0.29.0`. |
+
+</details>
+
+<details>
+<summary><b>🪟 Windows + WSL2</b></summary>
+
+Run DSH on a Windows host and open a project that lives **inside a WSL2 distribution**: the file tree, Git status, diffs, previews and "open with" all operate on the distribution's own files. Git is deliberately executed **inside the distribution** (`wsl.exe -d <distro> --exec git -C <linuxPath>`) — Windows git over the 9P mount reports bogus modifications: POSIX modes `100755` become `100644`, symlinks break, and CRLF/LF conversion adds churn.
+
+**Requirements** — Windows 10 1903+ or Windows 11; at least one WSL2 distribution; `wsl.exe` on `PATH`; and **git installed inside the distribution** (a Windows-only git setup is not used for these folders).
+
+**Nothing to configure.** A session whose working directory is a Linux path is recognised automatically — both the distro-side spelling (`/opt/app`, `/home/me/repo`) and the host-side UNC form (`\\wsl.localhost\Ubuntu\opt\app`, or the legacy `\\wsl$\Ubuntu\…`). A `/mnt/<drive>/…` path maps back to the Windows drive (`/mnt/d/work` → `D:\work`), so a project on a Windows disk behaves exactly as before.
+
+**Known limitations**
+
+- Change detection inside WSL folders polls the distribution every 2 s (up to 16 folders watched at once): an external change can take up to ~2 s to appear, and an in-place edit that keeps the same entry list is not reported.
+- Only `\\wsl.localhost\` (and the legacy `\\wsl$\`) UNC roots are supported.
+- Git runs inside the distribution by design, so a Windows-only git setup cannot be used for WSL folders.
+- A POSIX path is treated as WSL only when it sits under a real filesystem root (`/opt`, `/home`, `/tmp`, `/workspace`, …); any other absolute Linux path is left alone.
 
 </details>
 
@@ -241,7 +259,7 @@ make mount        # real-mount smoke: build + pack → pnpm test:mount
 
 **Architecture**: a single npm package with host/client halves — host (`src/index.ts`): `/sidebar/api/*` JSON API, media / HTML preview / upload routes and two WebSockets; client (`src/client/index.tsx`): native right-sidebar tabs + bottom workbench; state persisted per session in localStorage. Repository rules: [`AGENTS.md`](./AGENTS.md).
 
-Windows / Linux / macOS supported (macOS verified daily, the rest covered by unit tests and Windows CI); no native dependencies — building needs only Node ≥ 20 + pnpm ≥ 10.
+Windows / Linux / macOS supported, including **Windows + WSL2** workspaces (see the Windows + WSL2 block above; macOS verified daily, the rest covered by unit tests and Windows CI); no native dependencies — building needs only Node ≥ 20 + pnpm ≥ 10.
 
 </details>
 
