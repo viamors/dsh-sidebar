@@ -340,12 +340,12 @@ export default [
     clean: false,
   },
   // Official profile channel: bundle id = package name (package.json `name`).
-  clientBundle('dsh-better-sidebar', 'client.js'),
+  clientBundle('@vimors/dsh-sidebar', 'client.js'),
   // Third-party registry channel: bundle id = the market manifest's id
   // (dsh.plugin.json). DSH never reads that file — the official profile
   // channel is the package-name bundle above, declared through
   // package.json's `dsh.bundle.patch`.
-  clientBundle('dsh-external/dsh-better-sidebar', 'client-registry.js'),
+  clientBundle('@vimors/dsh-sidebar', 'client-registry.js'),
   // Lazy chunks: shared by both channels, fetched on first use through the
   // plugin's /sidebar/bundle route (see src/client/chunk-loader.ts).
   ...CHUNKS.map(chunkBundle),
