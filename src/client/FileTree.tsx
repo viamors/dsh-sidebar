@@ -1072,6 +1072,35 @@ export function FileTree(props: {
     onStale: retryDirs,
   })
 
+  // Listen to custom reveal events dispatched across panels (e.g. GitLens or locate-active-file)
+  useEffect(() => {
+    const onCustomReveal = (event: Event): void => {
+      const custom = event as CustomEvent<{ path?: string }>
+      const p = custom.detail?.path
+      if (typeof p !== 'string' || p === '') return
+      const body = bodyRef.current
+      if (body === null) return
+      // Give DOM time to expand and mount row
+      setTimeout(() => {
+        const rows = body.querySelectorAll<HTMLElement>('[data-dsh-path]')
+        for (const r of rows) {
+          if (r.getAttribute('data-dsh-path') === p) {
+            r.setAttribute('data-dsh-revealed', 'true')
+            const bodyTop = body.getBoundingClientRect().top
+            const rowRect = r.getBoundingClientRect()
+            const target = body.scrollTop + (rowRect.top + rowRect.height / 2) - (bodyTop + body.clientHeight / 2)
+            const max = Math.max(body.scrollHeight - body.clientHeight, 0)
+            body.scrollTo({ top: Math.min(Math.max(target, 0), max), behavior: 'smooth' })
+            setTimeout(() => { r.removeAttribute('data-dsh-revealed') }, 2000)
+            break
+          }
+        }
+      }, 150)
+    }
+    window.addEventListener('dsh-sidebar:reveal-path', onCustomReveal)
+    return () => { window.removeEventListener('dsh-sidebar:reveal-path', onCustomReveal) }
+  }, [])
+
   // Bring a "Show in folder" reveal into view: the ancestors expand above
   // (revealPaths), but the row may not be scrolled into sight — a reveal on
   // a long tree should surface the highlighted file. Re-runs when the tree
@@ -2360,6 +2389,7 @@ export function FileTree(props: {
           // 6: copy, then the mutations (never on the workspace root row).
           { id: 'relative', label: t('copyRelative'), icon: <IconCopyOutlineRegular size={14} /> },
           { id: 'absolute', label: t('copyAbsolute'), icon: <IconCopyOutlineRegular size={14} /> },
+          { id: 'markdown-link', label: t('copyMarkdownLink'), icon: <IconLinkOutlineRegular size={14} /> },
           ...(rowMenu !== null && rowMenu.path !== cwd
             ? [
                 { id: 'mutate-sep', type: 'separator' } as MenuEntry,
@@ -2435,6 +2465,12 @@ export function FileTree(props: {
             const armed = scopeOf(propsRef.current)
             if (armed === undefined) return
             setConfirmDelete({ path: target.path, isDir: target.isDir, name: baseName(target.path), scope: armed })
+            return
+          }
+          if (id === 'markdown-link') {
+            const rel = relativeTo(cwd ?? '', target.path)
+            const base = baseName(target.path)
+            copyPath(`[${base}](${rel})`, target.path)
             return
           }
           copyPath(

@@ -773,6 +773,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
             getTabBadge={tabBadgeOf}
             isTabUnread={isTabUnread}
             getTabRightActions={tabRightActionsOf}
+            cwd={shellScope?.cwd}
             onRevealInFileManager={revealTabFile}
           />
         </div>

@@ -11,9 +11,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconCloseFillRegular, IconPlusOutlineRegular, Menu,
+  IconCloseFillRegular, IconCopyOutlineRegular, IconFolderOpenRegular, IconPlusOutlineRegular, Menu, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconButton } from './ui/index.ts'
 import type { SidebarTab } from './state.ts'
+import { relativeTo } from './paths.ts'
 import { t } from './locales.ts'
 import css from './sidebar.module.css'
 
@@ -89,6 +91,11 @@ export function TabBar(props: {
    */
   getTabRightActions?: (tab: SidebarTab, paneId: string) => ReactNode
   /**
+   * The current workspace working directory (used to compute relative paths
+   * for the tab context menu's "Copy Relative Path" action).
+   */
+  cwd?: string
+  /**
    * Reveal one tab's associated file in the OS file manager — the tab
    * context menu's reveal row, fed by the shell with the host's open-in-app
    * capability. The row is disabled for a tab with no associated file (no
@@ -100,6 +107,7 @@ export function TabBar(props: {
   const {
     paneId, tabs, active, onActivate, onClose, onNewTab, newTabOptions, onDropTab, getTabIcon, getTabBadge, getTabRightActions,
     isTabUnread,
+    cwd,
     onRevealInFileManager,
   } = props
   const [menuOpen, setMenuOpen] = useState(false)
@@ -335,7 +343,14 @@ export function TabBar(props: {
             { id: 'closeLeft', label: t('closeLeftTabs'), ...(tabMenuIndex <= 0 ? { disabled: true } : {}) },
             { id: 'closeRight', label: t('closeRightTabs'), ...(tabMenuIndex >= tabs.length - 1 ? { disabled: true } : {}) },
             { id: 'closeAll', label: t('closeAllTabs') },
-            { id: 'revealInFileManager', label: t('revealTabInFileManager'), ...(canReveal ? {} : { disabled: true }) },
+            ...(tabMenuPath !== undefined && tabMenuPath !== ''
+              ? [
+                  { type: 'separator', id: 'sep-path' } as const,
+                  { id: 'copyRelative', label: t('copyRelative'), icon: <IconCopyOutlineRegular size={14} /> },
+                  { id: 'copyAbsolute', label: t('copyAbsolute'), icon: <IconCopyOutlineRegular size={14} /> },
+                  { id: 'revealInFileManager', label: t('revealTabInFileManager'), icon: <IconFolderOpenRegular size={14} />, ...(canReveal ? {} : { disabled: true }) },
+                ]
+              : []),
           ]}
           onSelect={(id) => {
             const target = tabMenu
@@ -343,6 +358,7 @@ export function TabBar(props: {
             setTabMenu(null)
             const index = tabs.findIndex(tab => tab.id === target.tabId)
             if (index < 0) return
+            const targetPath = tabs[index]?.path
             if (id === 'close') {
               onClose(target.tabId)
             } else if (id === 'closeOthers') {
@@ -358,9 +374,16 @@ export function TabBar(props: {
               // is what separates it from "close others") and the ones
               // scrolled out of the strip's viewport included.
               for (const tab of tabs) onClose(tab.id)
+            } else if (id === 'copyRelative') {
+              if (targetPath !== undefined && targetPath !== '') {
+                void writeClipboard(relativeTo(cwd ?? '', targetPath))
+              }
+            } else if (id === 'copyAbsolute') {
+              if (targetPath !== undefined && targetPath !== '') {
+                void writeClipboard(targetPath)
+              }
             } else if (id === 'revealInFileManager') {
-              const path = tabs[index]?.path
-              if (path !== undefined && path !== '') onRevealInFileManager?.(path)
+              if (targetPath !== undefined && targetPath !== '') onRevealInFileManager?.(targetPath)
             }
           }}
           portal
@@ -376,12 +399,35 @@ export function TabBar(props: {
         control). A descriptor that declares `rightActions` supplies its own
         toolbar here (e.g. a terminal tab's new / split / restart buttons),
         so the page's controls live in the strip instead of a separate header
-        row below it. The node is resolved BEFORE the wrapper is created: a
-        resolver returning null/undefined (or false) must leave the strip
-        exactly as it was — an empty flex item would still take part in the
-        strip's layout and change every existing tab bar.
+        row below it. For file tabs, it also offers quick copy and reveal actions.
       */}
-      {hasRightActions ? <div className={css.tabBarRightActions}>{rightActions}</div> : null}
+      {hasRightActions || (activeRightTab?.path !== undefined && activeRightTab.path !== '') ? (
+        <div className={css.tabBarRightActions}>
+          {hasRightActions ? rightActions : null}
+          {activeRightTab?.path !== undefined && activeRightTab.path !== '' ? (
+            <>
+              <IconButton
+                size="sm"
+                icon={<IconCopyOutlineRegular size={14} />}
+                label={t('copyRelative')}
+                onClick={() => {
+                  void writeClipboard(relativeTo(cwd ?? '', activeRightTab.path!))
+                }}
+              />
+              {onRevealInFileManager !== undefined ? (
+                <IconButton
+                  size="sm"
+                  icon={<IconFolderOpenRegular size={14} />}
+                  label={t('revealTabInFileManager')}
+                  onClick={() => {
+                    onRevealInFileManager(activeRightTab.path!)
+                  }}
+                />
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

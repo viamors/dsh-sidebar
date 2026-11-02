@@ -262,6 +262,23 @@ export function TreePanel(props: {
           onChange={(event) => { setQuery(event.target.value) }}
         />
         <IconButton
+          label={t('locateActiveFile')}
+          icon={<IconFolderOpenRegular size={14} />}
+          onClick={() => {
+            const tabs = service?.nativePathTabs?.() ?? []
+            const currentTab = tabs.find((t: { path?: string }) => typeof t.path === 'string' && t.path !== '')
+            const targetPath = currentTab?.path
+            if (targetPath !== undefined && targetPath !== '') {
+              if (cwd !== undefined && isWithinWorkspace(cwd, targetPath)) {
+                for (const p of ancestorDirs(cwd, [targetPath])) {
+                  if (!expanded.includes(p)) onToggle(p)
+                }
+              }
+              window.dispatchEvent(new CustomEvent('dsh-sidebar:reveal-path', { detail: { path: targetPath } }))
+            }
+          }}
+        />
+        <IconButton
           label={t('refresh')}
           icon={<IconRefreshOutlineRegular size={14} />}
           onClick={() => { setRefreshTick(tick => tick + 1) }}

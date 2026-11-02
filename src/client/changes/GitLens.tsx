@@ -13,6 +13,7 @@ import {
   IconBranchOutlineRegular, IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular,
   IconChecklistOutlineRegular, IconCloseFillRegular, IconCodeOutlineRegular, IconCopyOutlineRegular,
   IconDownloadOutlineRegular, IconEllipsisOutlineRegular,
+  IconFolderOpenRegular,
   IconPlusOutlineRegular, IconRightUpOutlineRegular,
   IconRefreshOutlineRegular, IconSearchOutlineRegular, IconSparkleRegular, IconTrashOutlineRegular, Menu, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -1532,6 +1533,7 @@ export function GitLens(props: GitLensProps) {
             ? [{ id: 'discard', label: t('discard'), icon: <IconTrashOutlineRegular size={14} />, danger: true }]
             : []),
           { type: 'separator', id: 'sep1' },
+          { id: 'reveal-in-tree', label: t('revealInFileTree'), icon: <IconFolderOpenRegular size={14} /> },
           { id: 'relative', label: t('copyRelative'), icon: <IconCopyOutlineRegular size={14} /> },
           { id: 'absolute', label: t('copyAbsolute'), icon: <IconCopyOutlineRegular size={14} /> },
         ]}
@@ -1544,6 +1546,13 @@ export function GitLens(props: GitLensProps) {
             // The host accepts any path now (no containment), so the open
             // guard that mirrored the old fence is gone with it.
             onOpenFile(resolved)
+            return
+          }
+          if (id === 'reveal-in-tree') {
+            const resolved = resolveSidebarPath(selectedWorktree ?? repoRoot ?? snapshot?.root ?? scope.cwd, target.path)
+            const s = ctx?.get('betterSidebar')
+            s?.openTab({ type: 'editor', target: 'side', reveal: true }, scope)
+            window.dispatchEvent(new CustomEvent('dsh-sidebar:reveal-path', { detail: { path: resolved } }))
             return
           }
           if (id === 'stage') {

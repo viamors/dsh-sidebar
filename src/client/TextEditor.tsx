@@ -20,7 +20,11 @@ import { EditorState } from '@codemirror/state'
 import { EditorView as CodeMirrorView, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
-import { IconCheckOutlineRegular, IconSearchOutlineRegular, MarkdownDelegateProvider, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconCheckOutlineRegular, IconCopyOutlineRegular, IconFolderOpenRegular, IconLinkOutlineRegular, IconSearchOutlineRegular,
+  MarkdownDelegateProvider, MarkdownText, Menu, writeClipboard,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import { baseName, relativeTo } from './paths.ts'
 import { markdownTextProps } from './markdown-labels.tsx'
 import {
   applyGitLineKinds,
@@ -262,6 +266,15 @@ export function TextEditor(props: FileViewerProps) {
     // in preview mode, the CodeMirror host otherwise.
     getSurface: () => (markdown && mode === 'preview' ? mdRef.current : hostRef.current),
   })
+
+  // Editor content area context menu (copy path, reveal in file tree / manager)
+  const [editorMenu, setEditorMenu] = useState<{ x: number; y: number } | null>(null)
+  const onEditorContextMenu = useCallback((event: React.MouseEvent) => {
+    // Only intercept when right-clicking on editor surface and target has path
+    if (path === '') return
+    event.preventDefault()
+    setEditorMenu({ x: event.clientX, y: event.clientY })
+  }, [path])
 
   useEffect(() => subscribeColorScheme(() => { setDark(isDarkScheme()) }), [])
 
@@ -1020,6 +1033,7 @@ export function TextEditor(props: FileViewerProps) {
           <div
             className={clsx(css.editorCm, showingPreview && css.editorCmHidden)}
             ref={hostRef}
+            onContextMenu={onEditorContextMenu}
           />
         </>
       )}
@@ -1134,6 +1148,50 @@ export function TextEditor(props: FileViewerProps) {
         </button>,
         document.body,
       )}
+      <Menu
+        open={editorMenu !== null}
+        onClose={() => { setEditorMenu(null) }}
+        items={[
+          { id: 'copyRelative', label: t('copyRelative'), icon: <IconCopyOutlineRegular size={14} /> },
+          { id: 'copyAbsolute', label: t('copyAbsolute'), icon: <IconCopyOutlineRegular size={14} /> },
+          { id: 'copyMarkdown', label: t('copyMarkdownLink'), icon: <IconLinkOutlineRegular size={14} /> },
+          { type: 'separator', id: 'sep1' } as const,
+          { id: 'revealTree', label: t('revealInFileTree'), icon: <IconFolderOpenRegular size={14} /> },
+          { id: 'revealExplorer', label: t('revealTabInFileManager'), icon: <IconFolderOpenRegular size={14} /> },
+        ]}
+        onSelect={(id) => {
+          if (editorMenu === null || path === '') return
+          setEditorMenu(null)
+          const rel = relativeTo(scope.cwd ?? '', path)
+          const base = baseName(path)
+          if (id === 'copyRelative') {
+            void writeClipboard(rel)
+          } else if (id === 'copyAbsolute') {
+            void writeClipboard(path)
+          } else if (id === 'copyMarkdown') {
+            let lineSuffix = ''
+            const view = viewRef.current
+            if (view !== null) {
+              const sel = view.state.selection.main
+              if (!sel.empty) {
+                const startLine = view.state.doc.lineAt(sel.from).number
+                const endLine = view.state.doc.lineAt(sel.to).number
+                lineSuffix = startLine === endLine ? `#L${startLine}` : `#L${startLine}-L${endLine}`
+              }
+            }
+            void writeClipboard(`[${base}](${rel}${lineSuffix})`)
+          } else if (id === 'revealTree') {
+            window.dispatchEvent(new CustomEvent('dsh-sidebar:reveal-path', { detail: { path } }))
+          } else if (id === 'revealExplorer') {
+            void api.openExternal({ action: 'reveal', path })
+          }
+        }}
+        portal
+        compact
+        align="start"
+        getAnchorRect={() => (editorMenu === null ? null : new DOMRect(editorMenu.x, editorMenu.y, 0, 0))}
+        anchor={<span />}
+      />
     </>
   )
 }
