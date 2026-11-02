@@ -110,12 +110,9 @@ export function resolveSessionPath(
 ): string {
   if (platform !== 'win32') return target
 
-  // If target is a WSL DrvFs mount (/mnt/c/...), map it to Windows drive format
-  if (isDrvFsPath(target)) {
-    return drvFsToWindowsPath(target, '\\')
-  }
-
-  // If target is already a WSL UNC path (including single-slash or drive-prefixed), normalize it
+  // A WSL UNC target (including single-slash or drive-prefixed spellings)
+  // names the same location in every session namespace, so canonicalize it
+  // before the cwd has any say.
   if (isWslUncPath(target)) {
     return normalizeWslUncForWindows(target)
   }
@@ -131,28 +128,37 @@ export function resolveSessionPath(
   // that `win32.resolve` would walk out of the distro/mirror root with.
   const posixTarget = /^\/(?!\/)/.test(target) ? posix.normalize(target) : undefined
 
+  // A WSL session: `/mnt/<drive>` is the local drive, every other slash-rooted
+  // path is the distro's own filesystem.
   if (wsl !== undefined) {
+    if (isDrvFsPath(target)) return drvFsToWindowsPath(target, '\\')
     if (posixTarget === undefined) return target
     const distroRoot = `\\\\wsl.localhost\\${wsl.distro}`
     const relative = posixTarget.slice(1).replace(/\//g, '\\')
     return win32.resolve(distroRoot, relative)
   }
 
-  if (posixTarget === undefined) return target
-
   // A dsh-remote mirror: map the remote workspace path onto the local mirror
-  // root. Only paths inside the mirrored workspace are projected.
-  const mirror = REMOTE_MIRROR_ROOT.exec(normalizedCwd)
-  if (mirror !== null) {
-    const mirrorRoot = mirror[1]!
-    const remotePath = remotePathOf(mirrorRoot)
-    if (remotePath !== undefined) {
-      const relative = relativeUnderPosix(remotePath, posixTarget)
-      if (relative !== undefined) {
-        return relative === '' ? win32.resolve(mirrorRoot) : win32.resolve(mirrorRoot, relative.replace(/\//g, '\\'))
+  // root. Only paths inside the mirrored workspace are projected — and this
+  // runs BEFORE the DrvFs rewrite below, because `/mnt/d/project` inside a
+  // remote workspace is a path on the REMOTE host; rewriting it to the local
+  // `D:` drive would open an unrelated local file (or none).
+  if (posixTarget !== undefined) {
+    const mirror = REMOTE_MIRROR_ROOT.exec(normalizedCwd)
+    if (mirror !== null) {
+      const mirrorRoot = mirror[1]!
+      const remotePath = remotePathOf(mirrorRoot)
+      if (remotePath !== undefined) {
+        const relative = relativeUnderPosix(remotePath, posixTarget)
+        if (relative !== undefined) {
+          return relative === '' ? win32.resolve(mirrorRoot) : win32.resolve(mirrorRoot, relative.replace(/\//g, '\\'))
+        }
       }
     }
   }
+
+  // Outside a mirror session a DrvFs mount (/mnt/<drive>) is the local drive.
+  if (isDrvFsPath(target)) return drvFsToWindowsPath(target, '\\')
 
   return target
 }

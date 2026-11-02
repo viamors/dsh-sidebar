@@ -313,7 +313,7 @@ export function apply(ctx: Context): void {
         if (mounted || disposed) return
         try {
           host = document.createElement('div')
-          host.setAttribute('data-dsh-better-sidebar', '')
+          host.setAttribute('data-vimors-dsh-sidebar', '')
           document.body.appendChild(host)
           root = createRoot(host)
           root.render(createElement(

@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 import { isWslUncPath, parseWslUncPath, linuxPathToWslUnc, normalizeWslUncForWindows, windowsToDrvFsPath } from './wsl-path.ts'
 import { decodeWslOutput } from './wsl-env.ts'
+import { WslGitBridgeUnavailableError, runWslGit, type WslGitResult } from './wsl-git-bridge.ts'
 
 /** A parsed porcelain status entry (v1 XY convention). */
 export interface GitStatusEntry {
@@ -408,9 +409,17 @@ function countNulFields(chunk: Buffer): number {
   return count
 }
 
-/** One spawn. `safe` directories ride in as per-invocation `safe.directory`
- *  overrides (empty on the first attempt, so a healthy repository sees the
- *  exact same argv it always did). */
+/**
+ * One git invocation. `safe` directories ride in as per-invocation
+ * `safe.directory` overrides (empty on the first attempt, so a healthy
+ * repository sees the exact same argv it always did).
+ *
+ * A `\\wsl.localhost\…` checkout is served by the distro's own git, and on
+ * Windows that delegation goes through the persistent bridge first (see
+ * `wsl-git-bridge.ts`): process startup, not git, is what makes a WSL refresh
+ * cost a second. The bridge is optional — every failure falls back to the plain
+ * one-process-per-call spawn below, so correctness never depends on it.
+ */
 function spawnGit(
   cwd: string,
   args: string[],
@@ -477,11 +486,101 @@ function spawnGit(
         'git', ...full,
       ]
     : full
+  // The wrapper-free spelling, used only after `timeout`/`env` proved absent.
+  const bareFull = isWsl && parsedWsl !== undefined
+    ? ['-d', parsedWsl.distro, '--exec', 'git', ...full]
+    : full
 
   const maxBytes = options.maxBytes ?? GIT_OUTPUT_MAX_BYTES
   const maxNulFields = options.maxNulFields
+
+  if (isWsl && parsedWsl !== undefined) {
+    const distro = parsedWsl.distro
+    // The persistent bridge is tried first: on this machine a bare
+    // `wsl.exe … git` costs ~190 ms of process startup per call against ~15 ms
+    // of actual git work, and one changes-panel refresh issues four to six
+    // calls. Any bridge failure is an invitation to do it the slow, certain
+    // way — never an error of its own.
+    return runWslGit(distro, ['git', ...full], { timeoutMs, maxBytes })
+      .then(result => bridgeStdout(result, args, timeoutMs, maxBytes, maxNulFields))
+      .catch((error: unknown) => {
+        if (!(error instanceof WslGitBridgeUnavailableError)) throw error
+        return spawnGitProcess(spawnCmd, spawnFull, true, args, timeoutMs, maxBytes, maxNulFields)
+          .catch((inner: unknown) => {
+            // A distro without GNU `timeout`/`env` (busybox, Alpine, a broken
+            // coreutils) cannot run the wrapper at all: exit 126/127 with an
+            // exec diagnostic. Retry once with the bare `git` argv and remember
+            // it per distro, so the panel degrades to "no timeout, no
+            // GIT_OPTIONAL_LOCKS" instead of "git never works here".
+            if (wrapperMissing.has(distro) || !isMissingWrapper(inner)) throw inner
+            wrapperMissing.add(distro)
+            return spawnGitProcess(spawnCmd, bareFull, true, args, timeoutMs, maxBytes, maxNulFields)
+          })
+      })
+  }
+  return spawnGitProcess(spawnCmd, spawnFull, isWsl, args, timeoutMs, maxBytes, maxNulFields)
+}
+
+/**
+ * Turn one bridged answer into the exact shape {@link spawnGit} promises.
+ *
+ * The bridge delivers a finished answer instead of a stream, so the two limits
+ * the streaming path enforces live have to be re-applied here: an over-cap
+ * answer is still a rejection (the bytes were already refused by the loop's
+ * `head -c`), and the caller's row cap still resolves the rows produced before
+ * it was reached, which is what a torn tail means everywhere else in this file.
+ */
+function bridgeStdout(
+  result: WslGitResult,
+  args: string[],
+  timeoutMs: number,
+  maxBytes: number,
+  maxNulFields: number | undefined,
+): string {
+  if (result.capped) {
+    throw new GitCommandError(`git ${args[0] ?? ''} output exceeded ${maxBytes} bytes`, 'git-error', args.join(' '))
+  }
+  // `timeout -s KILL` reports 137 (128 + SIGKILL); the older shells report 124.
+  if (result.code === 137 || result.code === 124) {
+    throw new GitCommandError(`git ${args[0] ?? ''} timed out after ${timeoutMs}ms`, 'git-error', args.join(' '))
+  }
+  if (result.code !== 0) {
+    throw new GitCommandError(
+      result.stderr.trim() || `git exited with ${String(result.code)}`,
+      'git-error',
+      args.join(' '),
+    )
+  }
+  if (maxNulFields === undefined) return result.stdout
+  let at = -1
+  for (let field = 0; field < maxNulFields; field += 1) {
+    at = result.stdout.indexOf('\0', at + 1)
+    if (at === -1) return result.stdout
+  }
+  return result.stdout.slice(0, at + 1)
+}
+
+/** Distros already known to lack the `timeout`/`env` wrapper (see spawnGit). */
+const wrapperMissing = new Set<string>()
+
+/** Whether a delegation failure means the wrapper binaries are absent. */
+function isMissingWrapper(error: unknown): boolean {
+  return error instanceof GitCommandError
+    && /execvpe|command not found|No such file or directory/i.test(error.message)
+}
+
+/** One spawn, with the streaming byte/field caps of the direct path. */
+function spawnGitProcess(
+  cmd: string,
+  argv: string[],
+  isWsl: boolean,
+  args: string[],
+  timeoutMs: number,
+  maxBytes: number,
+  maxNulFields: number | undefined,
+): Promise<string> {
   return new Promise<string>((resolvePromise, reject) => {
-    const child = spawn(spawnCmd, spawnFull, {
+    const child = spawn(cmd, argv, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: isWsl ? process.env : { ...process.env, ...GIT_ENV },
@@ -1009,8 +1108,13 @@ export async function status(cwd: string, selected?: string): Promise<GitStatusR
 
 /** Platform-aware identity used only for comparing absolute checkout roots. */
 function pathIdentity(path: string): string {
+  // `linuxPathToWslUnc` keeps a trailing `/`, so the WSL branch has to strip
+  // separators exactly like the native one does: `\\wsl.localhost\Ubuntu\repo\`
+  // and `…\repo` name the same checkout and must compare equal, or the
+  // discovery pass lists one repository twice and the selected root never
+  // matches.
   const norm = (process.platform === 'win32' && isWslUncPath(path))
-    ? normalizeWslUncForWindows(path)
+    ? normalizeWslUncForWindows(path).replace(/[\\/]+$/, '')
     : resolve(path).replace(/[\\/]+$/, '')
   return process.platform === 'win32' ? norm.toLowerCase() : norm
 }

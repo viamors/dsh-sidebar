@@ -15,12 +15,10 @@
 
 .head { flex: none; display: flex; align-items: stretch; gap: 8px; height: 36px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--dsw-alias-border-l1); }
 .headAction { margin-left: auto; align-self: center; }
-.head :global(.wSkVaW_tabs) { gap: 24px; }
 .lensBody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* Retained but not on screen: `display: flex` above would otherwise win over
    the `hidden` attribute and two lenses would share the column. */
 .lensBody[hidden] { display: none; }
-.head :global(.wSkVaW_tab):focus-visible { outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent); outline-offset: -2px; }
 
 /* ── Git lens (the former git panel) ───────────────────────────────────── */
 
@@ -56,25 +54,47 @@
 
 .scmHeader { display: flex; align-items: center; min-height: 28px; padding: 0 6px; }
 .scmDisclosure { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0; border: none; background: transparent; color: var(--dsw-alias-label-primary); font: var(--dsw-font-xxs-strong-12); text-align: left; cursor: pointer; }
-.scmActions { display: flex; align-items: center; gap: 2px; opacity: 0; }
-.scmHeader:hover .scmActions, .scmHeader:focus-within .scmActions { opacity: 1; }
-@media (hover: none) { .scmActions { opacity: 1; } }
 
 /* ── Pill toolbar (docked at the top) ──────────────────────────────────── */
 
-/* One row of chips over the scrolling body — repo · branch (+N −M) · upstream
-   — then the action cluster on the right. A sibling of `.gitScroll` so it
-   stays put while the change list scrolls, and a plain flex row (no z-index):
-   in a floating window the host's resize grip is the last child at
-   `z-index: auto`, so a stacking toolbar would paint over the bottom-right
-   corner and make the grip un-hittable. */
-.gitToolbar { flex: none; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
-.toolbarRow { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
-/* The chips shrink and ellipsize instead of pushing the cluster off-screen:
-   the branch name can be long, and a narrow panel must still show every
-   action. */
-.toolbarPills { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+/* A COLUMN: the chip row first, the failed-action notice UNDER it (a row
+   would have put the notice beside the row, squeezing the chips into a
+   sliver on a narrow panel). No z-index on purpose — in a floating window the
+   host's resize grip is the last child at `z-index: auto`, so a stacking
+   toolbar would paint over the bottom-right corner and make the grip
+   un-hittable. No top padding either: `.git` already insets the band by the
+   6px rhythm, and doubling it pushed the chips off the scroll body's edge. */
+.gitToolbar { flex: none; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 0 8px 6px; }
+.toolbarRow { flex: 1; width: 100%; min-width: 0; display: flex; align-items: center; gap: 8px; }
+/* The chips WRAP instead of being clipped: `overflow: hidden` here used to cut
+   the branch chip in half on a narrow panel, and the branch chip is a route to
+   `checkout()`. Wrapping costs one line of height at the breakpoint and keeps
+   every chip whole; the More menu carries the same repo/branch rows anyway. */
+.toolbarPills { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; overflow: visible; }
 .toolbarActions { flex: none; display: flex; align-items: center; gap: 2px; }
+/* The tab's lens switch, when it hands one in: it rides in the same band but
+   never shrinks (it is the only way to change lens). */
+.lensSwitch { flex: none; display: flex; align-items: center; }
+
+/* The More menu's trigger. A plain <button> rather than the kit's
+   `IconButton`: the kit one only publishes `aria-pressed`, and a menu trigger
+   has to announce `aria-haspopup` / `aria-expanded`. Sized and painted like
+   the kit's `size="sm"` button it replaces. */
+.toolbarIcon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.toolbarIcon:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.toolbarIcon:focus-visible { outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent); outline-offset: -1px; }
+.toolbarIcon[data-active='true'] { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); }
+.toolbarIcon:disabled { opacity: 0.45; cursor: default; }
+
+/* The lens switch itself: a real segmented control from this plugin's own
+   sheet. The host's `wSkVaW_tab*` classes were private and had already been
+   dropped from the installed build, which left two browser-default buttons. */
+.segmented { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-layer-1); }
+.segment { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border: none; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxxs-11); cursor: pointer; }
+.segment:not(.segmentActive):hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.segment:focus-visible { outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent); outline-offset: -1px; }
+.segmentActive { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 500; }
+.segment:disabled { opacity: 0.45; cursor: default; }
 
 /* A chip: outlined pill, label + chevron (+ the line totals for the branch
    one). `max-width: 100%` keeps a single long upstream ref from widening the
@@ -96,7 +116,7 @@
 /* A failed remote op reports under the toolbar and git's stderr can be long:
    it keeps its own height (never truncated) but gets a dismiss control instead
    of living in the docked row until the next action. */
-.actionError { display: flex; align-items: flex-start; gap: 6px; white-space: normal; margin: 0 8px 6px; }
+.actionError { display: flex; align-items: flex-start; gap: 6px; white-space: normal; margin: 0 8px; }
 .actionErrorText { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* No height cap here on purpose: the host's own `.scrollable` card rule
    (viewport-fit max-height + a scrolling `.viewport`) is what a long row list
@@ -682,8 +702,7 @@
 /* Keyboard focus rings match the shared sidebar convention (the kit atoms and
    the tree rows carry their own). */
 .opRow:focus-visible, .scmDisclosure:focus-visible,
-.branchButton:focus-visible, .syncButton:focus-visible, .suggestButton:focus-visible,
-.select:focus-visible, .dragHandle:focus-visible {
+.suggestButton:focus-visible, .select:focus-visible, .dragHandle:focus-visible {
   outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent);
   outline-offset: -1px;
 }

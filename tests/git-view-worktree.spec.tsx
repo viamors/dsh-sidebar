@@ -168,6 +168,12 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       mountGit(root)
       await flushEffects()
 
+      // The Graph starts folded; unfold it so its content, branch filter and
+      // fetch accounting participate in the assertions below.
+      const graphDisclosure = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
+      await act(async () => { graphDisclosure.click() })
+      await flushEffects()
+
       // A clean primary + exactly one dirty linked checkout auto-selects the
       // linked checkout and loads every target-derived surface from it.
       expect(branchButton(container).textContent).toContain('agent*')
@@ -224,6 +230,10 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       mountGit(root)
       await flushEffects()
 
+      // The Graph starts folded; unfold it so its rows (and Load more) mount.
+      const graphDisclosure = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
+      await act(async () => { graphDisclosure.click() })
+
       const loadMore = [...container.querySelectorAll<HTMLButtonElement>('[data-scm-section="graph"] button')]
         .find(button => button.textContent === t('graphLoadMore'))
       expect(loadMore).not.toBeUndefined()
@@ -255,8 +265,12 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
     ))
     const status = vi.spyOn(api, 'gitStatus').mockImplementation(async (scope) => (
       // Attached sessions ignore the client's cwd override; repoRoot selects the child.
+      // `repositories` is the whole discovery of the session cwd, whichever child
+      // is selected (`status()` in src/git.ts reports `repoRoots(cwd)`, not the
+      // selected root alone), so the picker keeps offering both rows after a
+      // switch.
       scope.repoRoot === REPO_B
-        ? { isRepo: true, branch: 'b-main', entries: [{ path: 'b-change.ts', xy: ' M' }], root: REPO_B, repositories: [REPO_B] }
+        ? { isRepo: true, branch: 'b-main', entries: [{ path: 'b-change.ts', xy: ' M' }], root: REPO_B, repositories: [REPO_A, REPO_B] }
         : { isRepo: true, branch: 'a-main', entries: [{ path: 'a-change.ts', xy: ' M' }], root: REPO_A, repositories: [REPO_A, REPO_B] }
     ))
     const branch = vi.spyOn(api, 'gitBranch').mockImplementation(async (scope) => (
@@ -458,6 +472,11 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       // Bringing the tab on screen loads the lens through one pass.
       mountGit(root, { visible: true })
       await flushEffects()
+      // The Graph starts folded; unfold it so its content mounts for the
+      // catch-up assertion below.
+      const graphDisclosure = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
+      await act(async () => { graphDisclosure.click() })
+      await flushEffects()
       expect(worktrees).toHaveBeenCalledTimes(1)
       expect(status).toHaveBeenCalled()
       expect(container.textContent).toContain('agent-change.ts')
@@ -615,8 +634,10 @@ describe('GitLens (changes tab, git lens) change tree', () => {
       // Both files hang under that one row.
       expect(container.querySelector('button[data-path="src/client/changes/a.ts"]')).not.toBeNull()
       expect(container.querySelector('button[data-path="src/client/changes/b.ts"]')).not.toBeNull()
-      // Nothing on the staged side: no empty group and no tree rows.
-      expect(container.querySelector('[data-group="staged"]')).toBeNull()
+      // Nothing on the staged side: the band keeps its header and a zero count
+      // (an always-visible band reads as a feature, not as a missing one) but
+      // prints no tree rows.
+      expect(container.querySelector('[data-group="staged"] [data-count]')?.textContent).toBe('0')
       expect(container.querySelectorAll('[data-group="staged"] [data-path]')).toHaveLength(0)
     } finally {
       act(() => { root.unmount() })
@@ -674,8 +695,10 @@ describe('GitLens (changes tab, git lens) change tree', () => {
       const stage = vi.spyOn(api, 'gitStage').mockResolvedValue({ ok: true })
       await act(async () => { stageAll!.click() })
       await flushEffects()
-      // "Stage all" stages the whole worktree: no path argument.
-      expect(stage).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session' }), undefined, MAIN)
+      // "Stage all" stages this band's rows by explicit path, one call per
+      // path: a bare `git add -A` would also sweep in what the band does not
+      // show (a truncated snapshot, a filtered view, a conflicted side).
+      expect(stage.mock.calls.map(call => call[1])).toEqual(['src/a.ts', 'docs/b.md'])
     } finally {
       act(() => { root.unmount() })
       container.remove()

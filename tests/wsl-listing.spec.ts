@@ -15,6 +15,7 @@ import {
   parseWslFindOutput,
   rowsFromWslEntries,
   setWslListingSpawn,
+  shouldFallBackToWslListing,
 } from '../src/wsl-listing.ts'
 import { compileExcludePatterns } from '../src/exclude-patterns.ts'
 
@@ -119,6 +120,29 @@ describe('isWslEnumerationCandidate', () => {
   })
 })
 
+describe('shouldFallBackToWslListing', () => {
+  const coded = (code: string): Error => Object.assign(new Error(code), { code })
+
+  it('retries only a share-level failure on a WSL share', () => {
+    const win32 = process.platform === 'win32'
+    expect(shouldFallBackToWslListing(coded('ECONNRESET'), UNC)).toBe(win32)
+    expect(shouldFallBackToWslListing(coded('EPIPE'), UNC)).toBe(win32)
+    // A broken 9P session on a non-WSL path has no Linux side to ask.
+    expect(shouldFallBackToWslListing(coded('ECONNRESET'), 'D:\\work\\app')).toBe(false)
+  })
+
+  it('never retries a path-level failure', () => {
+    // `ENOENT`/`ENOTDIR`/`EACCES` describe the PATH: a `find` inside the distro
+    // would answer the same way, after a spawn — and a cold distro boot when
+    // the distro is stopped. The client polls stale paths constantly.
+    for (const code of ['ENOENT', 'ENOTDIR', 'EACCES']) {
+      expect(shouldFallBackToWslListing(coded(code), UNC)).toBe(false)
+    }
+    expect(shouldFallBackToWslListing(new Error('no code'), UNC)).toBe(false)
+    expect(shouldFallBackToWslListing(undefined, UNC)).toBe(false)
+  })
+})
+
 describe('listDirectoryViaWsl', () => {
   it('spawns wsl.exe with --exec and returns the parsed entries', async () => {
     const fake = fakeChild()
@@ -169,6 +193,49 @@ describe('listDirectoryViaWsl', () => {
     fake.child.emit('error', new Error('spawn wsl.exe ENOENT'))
     await expect(pending).resolves.toBeUndefined()
     expect(fake.killed()).toBe(true)
+  })
+
+  it('answers undefined when a failing child explains itself on stdout', async () => {
+    // Verified on this host: `wsl.exe -d NoSuchDistro --exec find ...` exits
+    // 4294967295 and prints its diagnostic to STDOUT, never stderr. The old
+    // `code !== 0 && stdout === ''` test therefore handed the caller an empty
+    // entry list, which the UI rendered as a genuinely empty folder.
+    const fake = fakeChild()
+    useChild(() => fake.child)
+    const pending = listDirectoryViaWsl(UNC)
+    await tick()
+    fake.out.write('WSL_E_DISTRO_NOT_FOUND: 登录失败。\r\n')
+    fake.child.emit('close', 4294967295)
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('keeps partial rows only for the exit code find uses for a vanished level', async () => {
+    // Exit 1 is find's "I hit an error but may have printed rows"; any other
+    // failure is wsl.exe talking, and its text is not a listing.
+    const fake = fakeChild()
+    useChild(() => fake.child)
+    const pending = listDirectoryViaWsl(UNC)
+    await tick()
+    fake.out.write('f\tsurvivor.ts\n')
+    fake.child.emit('close', 2)
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('decodes a multi-byte name split across two stdout chunks', async () => {
+    // A 3-byte UTF-8 character can straddle a chunk boundary; decoding each
+    // chunk on its own turned it into U+FFFD and the row got a wrong name.
+    const fake = fakeChild()
+    useChild(() => fake.child)
+    const pending = listDirectoryViaWsl(UNC)
+    await tick()
+    const bytes = Buffer.from('f\t東京計画.ts\n', 'utf8')
+    // "f" + TAB + the first byte of the first 3-byte character.
+    fake.out.write(bytes.subarray(0, 3))
+    await tick()
+    fake.out.write(bytes.subarray(3))
+    await tick()
+    fake.child.emit('close', 0)
+    await expect(pending).resolves.toEqual([{ kind: 'f', name: '東京計画.ts' }])
   })
 
   it('answers undefined and kills the child when the pass times out', async () => {

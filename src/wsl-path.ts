@@ -4,7 +4,8 @@
  * Pure path logic - safe for both Node host and browser client builds.
  */
 
-/** Regex matching WSL UNC paths in backslash, forward slash, single-slash, or drive-prefixed form:
+/** Regex matching WSL UNC paths in backslash, forward slash, single-slash, drive-prefixed, or
+ *  long-path-prefixed form:
  *  - \\wsl.localhost\<distro>\<path>
  *  - \\wsl$\<distro>\<path>
  *  - //wsl.localhost/<distro>/<path>
@@ -12,8 +13,10 @@
  *  - \wsl.localhost\<distro>\<path> (corrupted single-slash)
  *  - /wsl.localhost/<distro>/<path>
  *  - C:\wsl.localhost\<distro>\<path> (corrupted drive-prefixed)
+ *  - \\?\UNC\wsl.localhost\<distro>\<path> (Win32 long-path prefix; without it the
+ *    path escaped every WSL fast path — git delegation, watchers, enumeration)
  */
-export const WSL_UNC_REGEX = /^(?:[a-zA-Z]:)?[\\/]{1,2}(?:wsl\.localhost|wsl\$)[\\/]([^\\/]+)(?:[\\/](.*))?$/i
+export const WSL_UNC_REGEX = /^(?:(?:\\\\\?\\UNC\\)|(?:[a-zA-Z]:)?[\\/]{1,2})(?:wsl\.localhost|wsl\$)[\\/]([^\\/]+)(?:[\\/](.*))?$/i
 
 /** Regex matching Linux DrvFs mount paths: /mnt/<driveLetter>(/.*)? */
 export const DRVFS_REGEX = /^\/mnt\/([a-zA-Z])(?:\/(.*))?$/

@@ -73,6 +73,19 @@ describe('wsl-path utilities', () => {
       expect(normalizeWslUncForWindows(p2)).toBe('\\\\wsl.localhost\\Ubuntu\\opt\\AI_workspace\\yxy-channel\\.claude\\settings.local.json')
     })
 
+    it('accepts the Win32 long-path (\\\\?\\UNC\\) spelling', () => {
+      // The long-path prefix is what some Windows APIs hand back for a deep
+      // WSL path. Unrecognized, it escaped every WSL fast path — git
+      // delegation, watchers and the enumerator all saw a foreign path.
+      const p = '\\\\?\\UNC\\wsl.localhost\\Ubuntu\\home\\user\\project\\file.ts'
+      expect(isWslUncPath(p)).toBe(true)
+      expect(parseWslUncPath(p)).toEqual({
+        distro: 'Ubuntu',
+        linuxPath: '/home/user/project/file.ts',
+      })
+      expect(normalizeWslUncForWindows(p)).toBe('\\\\wsl.localhost\\Ubuntu\\home\\user\\project\\file.ts')
+    })
+
     it('rejects ordinary Windows paths, non-WSL UNC, or POSIX paths', () => {
       expect(isWslUncPath('C:\\Users\\test')).toBe(false)
       expect(isWslUncPath('/home/user/project')).toBe(false)

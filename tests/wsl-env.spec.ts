@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   decodeWslOutput,
+  detectWslDistroOnce,
   getDefaultWslDistroSync,
   isWslMissingBanner,
   listWslDistros,
@@ -68,6 +69,19 @@ describe('wsl-env isWslMissingBanner', () => {
 
   it('is false for a real listing', () => {
     expect(isWslMissingBanner('Ubuntu Running 2')).toBe(false)
+  })
+
+  it('recognizes a localized banner that carries no English wording', () => {
+    // Measured on this host: a Chinese-locale wsl.exe explains itself in
+    // Chinese and prints to STDOUT. The English regex cannot see that, so the
+    // structural test — text, no row, no header — decides.
+    expect(isWslMissingBanner('适用于 Linux 的 Windows 子系统没有已安装的分发。')).toBe(true)
+  })
+
+  it('is false for the header of an empty-but-valid listing', () => {
+    // WSL does not localize the column names, so a header proves this is a
+    // listing; caching it as "WSL is missing" would hide a real empty state.
+    expect(isWslMissingBanner('  NAME            STATE           VERSION')).toBe(false)
   })
 })
 
@@ -223,6 +237,34 @@ describe('listWslDistros over the spawn seam', () => {
     const [first, second] = await Promise.all([listWslDistros(), listWslDistros()])
     expect(first).toEqual(second)
     expect(calls).toBe(1)
+  })
+
+  it('holds a localized "no WSL" answer for the long TTL', async () => {
+    let calls = 0
+    setWslListRunner(async () => {
+      calls += 1
+      return '适用于 Linux 的 Windows 子系统没有已安装的分发。'
+    })
+    resetWslDistroCache()
+    await expect(listWslDistros()).resolves.toEqual([])
+    await expect(listWslDistros()).resolves.toEqual([])
+    // One spawn for the whole 60s window instead of a failing one every 10s.
+    expect(calls).toBe(1)
+  })
+
+  it('remembers a host without WSL so a re-activation does not spawn again', async () => {
+    let calls = 0
+    setWslListRunner(async () => { calls += 1; return 'no installed distributions' })
+    resetWslDistroCache()
+    await expect(detectWslDistroOnce()).resolves.toBeUndefined()
+    await expect(detectWslDistroOnce()).resolves.toBeUndefined()
+    expect(calls).toBe(1)
+  })
+
+  it('answers the detected distro for a host that has WSL', async () => {
+    setWslListRunner(async () => '  NAME  STATE  VERSION\n* Arch  Running  2\n')
+    resetWslDistroCache()
+    await expect(detectWslDistroOnce()).resolves.toBe('Arch')
   })
 
   afterEach(() => {

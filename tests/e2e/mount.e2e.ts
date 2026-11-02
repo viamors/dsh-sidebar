@@ -10,7 +10,7 @@
  *     (the same `workspace.create` / `session.create` calls the UI makes),
  *     so the sidebar has a real session to render;
  *  2. loads the page in headless Chromium and asserts the shell and the
- *     plugin's `[data-dsh-better-sidebar]` host mount;
+ *     plugin's `[data-vimors-dsh-sidebar]` host mount;
  *  3. asserts the plugin's crash markers never appear (no RenderBoundary /
  *     fail() strips, no `pageerror`, no plugin-prefixed console errors);
  *  4. expands DSH's native right Sidebar, sweeps every tab type the COMPOSED
@@ -169,7 +169,7 @@ test('plugin mounts into the DSH shell and survives a built-in tab sweep', async
   })
 
   // Load the shell. The app renders into #root; the plugin appends its own
-  // [data-dsh-better-sidebar] host once its client half activates.
+  // [data-vimors-dsh-sidebar] host once its client half activates.
   //
   // The editor chunk (client-editor.js) loads as soon as ANY files-window tab
   // renders — the seeded home tab mounts the moment the panel expands, long
@@ -181,7 +181,7 @@ test('plugin mounts into the DSH shell and survives a built-in tab sweep', async
   )
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
   await expect(page.locator('#root > *')).not.toHaveCount(0, { timeout: 90_000 })
-  const sidebar = page.locator('[data-dsh-better-sidebar]')
+  const sidebar = page.locator('[data-vimors-dsh-sidebar]')
   await expect(sidebar).toBeAttached({ timeout: 90_000 })
   // The unified panel host: the fixed containing block every panel lives in
   // (data-dsh-panel-host). Its presence is part of the injection contract.
@@ -239,7 +239,7 @@ test('plugin mounts into the DSH shell and survives a built-in tab sweep', async
       }).map((node) => (node.textContent ?? '').trim()),
       CRASH_STRIP_PATTERNS,
     )
-    expect(stripTexts, 'a dsh-better-sidebar error strip is present in the sidebar').toEqual([])
+    expect(stripTexts, 'an @vimors/dsh-sidebar error strip is present in the sidebar').toEqual([])
   }
 
   // The native Sidebar's way in lives in the conversation header's corner,
@@ -727,7 +727,7 @@ test('the bottom workbench opens the plugin terminal (#774) without shadowing th
   )
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
   await expect(page.locator('#root > *')).not.toHaveCount(0, { timeout: 90_000 })
-  const sidebar = page.locator('[data-dsh-better-sidebar]')
+  const sidebar = page.locator('[data-vimors-dsh-sidebar]')
   await expect(sidebar).toBeAttached({ timeout: 90_000 })
   await dismissOnboarding(page)
 
@@ -844,7 +844,7 @@ test('a shell-stamped render URL mounts normally; plugin chrome carries the stab
   // environment reports, and this scenario pins exactly that — a stamped page
   // mounts the plugin untouched.
   await gotoPage(page, { 'dsh-desktop-mode': 'advanced', 'dsh-desktop-platform': 'win32' })
-  await expect(page.locator('[data-dsh-better-sidebar]')).toBeAttached({ timeout: 90_000 })
+  await expect(page.locator('[data-vimors-dsh-sidebar]')).toBeAttached({ timeout: 90_000 })
   await expect(
     page.locator('body[data-dsh-title-bar-compat]'),
     'nothing may write the retired title-bar attributes any more',
@@ -894,7 +894,7 @@ test('a shell-stamped render URL mounts normally; plugin chrome carries the stab
     // id-bearing, so it outranks the `[data-window-drag]` rule).
     const root = document.querySelector('#root')
     ;(root ?? document.body).appendChild(strip)
-    const host = document.querySelector('[data-dsh-better-sidebar]')
+    const host = document.querySelector('[data-vimors-dsh-sidebar]')
     const layer = document.querySelector('[data-dsh-panel-host]')
     // This stamp-only page has no session, so the panel host has no child of
     // its own; `probe` stands in for the workbench panel the same `> *`
@@ -933,7 +933,7 @@ test('the custom-CSS escape hatch injects the user stylesheet live', async ({ pa
   expect(update.ok(), `settings.update: ${update.status()}`).toBe(true)
   try {
     await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
-    await expect(page.locator('[data-dsh-better-sidebar]')).toBeAttached({ timeout: 90_000 })
+    await expect(page.locator('[data-vimors-dsh-sidebar]')).toBeAttached({ timeout: 90_000 })
     await expect(page.locator('style[data-dsh-custom-css="custom"]')).toBeAttached()
     // The injected CSS is live (a custom property the page can read back).
     const marker = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--dsh-e2e-marker').trim())

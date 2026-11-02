@@ -1,11 +1,11 @@
 {
-  "name": "dsh-better-sidebar",
-  "version": "0.29.0",
+  "name": "@vimors/dsh-sidebar",
+  "version": "1.0.0",
   "description": "Better Sidebar for DSH — file tree, editor, changes, tasks and side chat in one column, separate for every conversation. Also exposes a service other plugins use to register sidebar tabs and file viewers.",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/omdsh-dev/DSH-better-sidebar"
+    "url": "https://github.com/viamors/dsh-sidebar"
   },
   "publishConfig": {
     "access": "public"

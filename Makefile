@@ -1,4 +1,4 @@
-# dsh-better-sidebar 命令面薄封装：目标仅转发 package.json scripts（唯一事实源），
+# @vimors/dsh-sidebar 命令面薄封装：目标仅转发 package.json scripts（唯一事实源），
 # 新增/改名 script 不需要动这里；本文件只补目标发现（help）与 CI 门禁聚合
 # （check / mount / mount-aggregate / registry）。
 

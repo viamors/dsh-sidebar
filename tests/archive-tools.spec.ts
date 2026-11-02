@@ -271,8 +271,8 @@ describe('archiveFileName', () => {
   })
 
   it('names the temp file after the task id and the tool extension', () => {
-    expect(archiveTempName('ar-1', '.zip')).toBe('dsh-better-sidebar-ar-1.zip')
-    expect(archiveTempName('ar-2', '.tar.gz')).toBe('dsh-better-sidebar-ar-2.tar.gz')
+    expect(archiveTempName('ar-1', '.zip')).toBe('@vimors/dsh-sidebar-ar-1.zip')
+    expect(archiveTempName('ar-2', '.tar.gz')).toBe('@vimors/dsh-sidebar-ar-2.tar.gz')
   })
 })
 

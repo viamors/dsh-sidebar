@@ -240,7 +240,7 @@ async function boot(page: Page): Promise<void> {
   await gotoPage(page)
   await dismissOnboarding(page)
   await expect(page.locator('#root > *')).not.toHaveCount(0, { timeout: 90_000 })
-  await expect(page.locator('[data-dsh-better-sidebar]')).toBeAttached({ timeout: 90_000 })
+  await expect(page.locator('[data-vimors-dsh-sidebar]')).toBeAttached({ timeout: 90_000 })
 }
 
 /**

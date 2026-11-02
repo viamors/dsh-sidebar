@@ -144,7 +144,7 @@ describe('registerContextDiagnosticsUI', () => {
     expect(slots.registrations.map(entry => entry.name).sort())
       .toEqual(['conversation.session.header.utilities', 'shell.overlay'])
     for (const entry of slots.registrations) {
-      expect(entry.id).toBe('dsh-better-sidebar:context-diagnostics')
+      expect(entry.id).toBe('@vimors/dsh-sidebar:context-diagnostics')
       expect(entry.order).toBe(20)
     }
     // The disposer releases both entries (HMR / plugin disable).

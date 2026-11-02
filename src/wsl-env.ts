@@ -76,7 +76,15 @@ export function parseWslListOutput(raw: string): WslDistroInfo[] {
  */
 export function isWslMissingBanner(raw: string): boolean {
   const text = raw.replaceAll('\0', '')
-  return /no installed distributions|wsl\s*--install|not recognized/i.test(text)
+  if (/no installed distributions|wsl\s*--install|not recognized/i.test(text)) return true
+  // A localized Windows prints that banner in the OS language, so the English
+  // test above cannot match it (verified: a Chinese-locale host answers with
+  // Chinese text plus a `WSL_E_...` code). Decide structurally instead: a real
+  // listing always carries the NAME/STATE/VERSION header — WSL does not
+  // localize those column names — and a banner never does. Text that yields no
+  // row and no header is an error message, not an empty distro list.
+  if (/name\s+state\s+version/i.test(text)) return false
+  return text.trim() !== '' && parseWslListOutput(text).length === 0
 }
 
 /**
@@ -126,6 +134,17 @@ const LIST_TTL_MISSING_MS = 60_000
 let cached: { at: number; ttl: number; distros: WslDistroInfo[] } | undefined
 let inFlight: Promise<WslDistroInfo[]> | undefined
 
+/**
+ * Process-lifetime memo of "this host has no usable WSL".
+ *
+ * The activation-time probe runs once per plugin `apply()`; on a machine
+ * without the WSL feature that probe is a ~1s failed `wsl.exe` spawn, and a
+ * per-activation cost is worth paying exactly once. A distro installed
+ * mid-session is picked up on the next host start — the same contract as
+ * every other activation-time detection here.
+ */
+let wslUnavailable = false
+
 let defaultDistroMemo = 'Ubuntu'
 
 /**
@@ -171,23 +190,44 @@ export async function getDefaultWslDistro(): Promise<string> {
 }
 
 /**
+ * Activation-time detection: resolve the default distro once, and remember a
+ * host that has no WSL so a later `apply()` does not pay another failed spawn.
+ *
+ * Unlike {@link getDefaultWslDistro} this never guesses a name for a machine
+ * without WSL — the caller has nothing to wire up in that case.
+ * @returns the default distro name, or undefined when this host has no WSL.
+ */
+export async function detectWslDistroOnce(): Promise<string | undefined> {
+  if (wslUnavailable) return undefined
+  const distros = await listWslDistros()
+  if (distros.length === 0) return undefined
+  return defaultDistroMemo
+}
+
+/**
  * Run `wsl.exe -l -v` and return its raw output.
  *
  * The stdout is kept even when the child exits non-zero: WSL reports "no
  * installed distributions" with a failing status, and that banner is the only
  * way to tell a missing WSL from an empty listing. Nothing is thrown — a
  * missing `wsl.exe` is a normal answer on a machine without WSL.
- * @returns the raw stdout bytes (empty when the spawn itself failed).
+ * @returns the raw stdout and whether the child failed without producing any.
  */
-async function runWslList(): Promise<Buffer | string> {
-  if (listRunner !== undefined) return await listRunner(['-l', '-v'])
-  if (process.platform !== 'win32') return ''
-  return await new Promise<Buffer>((resolvePromise) => {
+async function runWslList(): Promise<{ raw: Buffer | string; spawnFailed: boolean }> {
+  if (listRunner !== undefined) return { raw: await listRunner(['-l', '-v']), spawnFailed: false }
+  if (process.platform !== 'win32') return { raw: '', spawnFailed: true }
+  return await new Promise<{ raw: Buffer | string; spawnFailed: boolean }>((resolvePromise) => {
     execFile(
       'wsl.exe',
       ['-l', '-v'],
       { windowsHide: true, timeout: 5000, encoding: 'buffer' },
-      (_error, stdout) => resolvePromise(stdout),
+      (error, stdout) => {
+        // Zero bytes plus a failed child is the "no WSL on this host"
+        // signature (ENOENT where the feature is absent, or a killed child).
+        // Anything that produced output is judged by its content instead.
+        const raw = stdout ?? ''
+        resolvePromise({ raw, spawnFailed: error !== null && raw.length === 0 })
+      },
     )
   })
 }
@@ -205,17 +245,23 @@ export async function listWslDistros(): Promise<WslDistroInfo[]> {
   if (cached !== undefined && now - cached.at < cached.ttl) return cached.distros
   if (inFlight !== undefined) return await inFlight
   inFlight = (async (): Promise<WslDistroInfo[]> => {
-    const text = decodeWslOutput(await runWslList())
+    const { raw, spawnFailed } = await runWslList()
+    const text = decodeWslOutput(raw)
     const distros = parseWslListOutput(text)
     // An unparseable listing and a missing WSL both yield `[]`; only the
-    // banner proves which one it was, and that decides how long to cache it.
-    const ttl = distros.length === 0 && isWslMissingBanner(text) ? LIST_TTL_MISSING_MS : LIST_TTL_MS
+    // banner (in any language) or a spawn that produced nothing proves which
+    // one it was, and that decides how long to cache it.
+    const missing = distros.length === 0 && (spawnFailed || isWslMissingBanner(text))
+    const ttl = missing ? LIST_TTL_MISSING_MS : LIST_TTL_MS
+    if (missing) wslUnavailable = true
     const chosen = distros.find(distro => distro.isDefault)?.name ?? distros[0]?.name
     if (chosen !== undefined) {
       defaultDistroMemo = chosen
       setDefaultDistro(chosen)
     }
-    cached = { at: now, ttl, distros }
+    // Stamp the answer when it ARRIVES, not when the ask started: a 5s
+    // execFile timeout used to consume half of the 10s TTL before it was set.
+    cached = { at: Date.now(), ttl, distros }
     return distros
   })()
   try {
@@ -239,4 +285,5 @@ export async function isWslDistro(distro: string): Promise<boolean> {
 export function resetWslDistroCache(): void {
   cached = undefined
   inFlight = undefined
+  wslUnavailable = false
 }

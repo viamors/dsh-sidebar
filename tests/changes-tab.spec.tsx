@@ -174,8 +174,14 @@ async function settle(): Promise<void> {
 }
 
 /** Select the one commit the graph SECTION renders: the Graph area lives inside
- *  the Git lens (unfolded by default), so the row is on screen after mount. */
+ *  the Git lens but starts FOLDED, so this unfolds it first — the row mounts
+ *  with the section's own route answer. */
 async function openGraphCommit(container: HTMLElement): Promise<void> {
+  const disclosure = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')
+  if (disclosure !== null && disclosure.getAttribute('aria-expanded') === 'false') {
+    await act(async () => { disclosure.click() })
+    await settle()
+  }
   const row = container.querySelector<HTMLButtonElement>(`[data-graph-commit="${GRAPH_HASH}"]`)
   expect(row, 'the mocked graph page rendered its commit row').not.toBeNull()
   await act(async () => { row!.click() })
@@ -192,7 +198,7 @@ afterEach(() => {
 })
 
 describe('ChangesTab', () => {
-  it('uses the official underline Tabs with keyboard navigation, persisted lens and refresh', async () => {
+  it('uses the plugin segmented lens switch with keyboard navigation, persisted lens and refresh', async () => {
     mockGit([])
     const ops = vi.spyOn(api, 'changesOps').mockResolvedValue({ events: [], lastSeq: 0 })
     const updateTab = vi.fn()
@@ -204,15 +210,21 @@ describe('ChangesTab', () => {
       mount(root, { id: 'git', type: 'git', title: 'Changes', meta: { lens: 'session', previewH: 240 } }, ctx)
       await flushEffects()
 
-      const tabs = container.querySelector<HTMLElement>('[role="tablist"]')!
-      const git = lensTab(container, t('changesGitLens'))!
-      const session = lensTab(container, t('changesSessionLens'))!
-      expect(tabs.classList.contains('wSkVaW_tabs')).toBe(true)
-      expect(tabs.getAttribute('aria-label')).toBe(t('changes'))
-      expect(git.classList.contains('wSkVaW_tab')).toBe(true)
+      const tabs = (): HTMLElement => container.querySelector<HTMLElement>('[data-lens-switch]')!
+      const git = (): HTMLButtonElement => lensTab(container, t('changesGitLens'))!
+      const session = (): HTMLButtonElement => lensTab(container, t('changesSessionLens'))!
+      expect(tabs().getAttribute('role')).toBe('tablist')
+      expect(tabs().getAttribute('aria-label')).toBe(t('changes'))
+      expect(git().getAttribute('data-lens-option')).toBe('git')
+      expect(session().getAttribute('data-lens-option')).toBe('session')
+      // The switch is painted by this plugin's own sheet. The host's private
+      // `wSkVaW_tab*` classes are not part of the kit contract and are gone
+      // from the installed build — reusing them left two unstyled buttons.
+      expect(git().className).not.toContain('wSkVaW')
+      expect(git().className).toMatch(/segment/)
       const panels = (): HTMLElement[] => [...container.querySelectorAll<HTMLElement>('[role="tabpanel"]')]
       const selected = (button: HTMLButtonElement): void => {
-        expect(button.classList.contains('wSkVaW_tabActive')).toBe(true)
+        expect(button.className).toMatch(/segmentActive/)
         expect(button.getAttribute('aria-selected')).toBe('true')
         expect(button.tabIndex).toBe(0)
         // Both lenses own a panel (they stay mounted and swap `hidden`), so the
@@ -223,34 +235,40 @@ describe('ChangesTab', () => {
         expect(own.getAttribute('aria-labelledby')).toBe(button.id)
         expect(panels().filter(node => !node.hidden)).toEqual([own])
       }
-      selected(session)
-      expect(git.tabIndex).toBe(-1)
-      session.focus()
+      selected(session())
+      expect(git().tabIndex).toBe(-1)
+      session().focus()
       const key = async (button: HTMLButtonElement, name: string): Promise<void> => {
         const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })
         await act(async () => { button.dispatchEvent(event) })
         expect(event.defaultPrevented).toBe(true)
       }
-      await key(session, 'ArrowRight') // wraps to the first tab
-      selected(git)
-      expect(document.activeElement).toBe(git)
-      expect(session.classList.contains('wSkVaW_tabActive')).toBe(false)
-      expect(session.getAttribute('aria-selected')).toBe('false')
+      await key(session(), 'ArrowRight') // wraps to the first tab
+      selected(git())
+      // The switch MOVES between the tab's header row and the Git lens's chip
+      // toolbar, so the clicked segment is unmounted: focus is put back on the
+      // re-created active segment.
+      expect(document.activeElement).toBe(git())
+      expect(session().getAttribute('aria-selected')).toBe('false')
       expect(updateTab).toHaveBeenLastCalledWith('git', { meta: { lens: 'git', previewH: 240 } }, 'session')
-      await key(git, 'ArrowLeft') // wraps to the last tab
-      selected(session)
-      await key(session, 'Home')
-      selected(git)
-      await key(git, 'End')
-      selected(session)
+      await key(git(), 'ArrowLeft') // wraps to the last tab
+      selected(session())
+      await key(session(), 'Home')
+      selected(git())
+      await key(git(), 'End')
+      selected(session())
       expect(updateTab).toHaveBeenLastCalledWith('git', { meta: { lens: 'session', previewH: 240 } }, 'session')
 
       const calls = ops.mock.calls.length
       await act(async () => { container.querySelector<HTMLButtonElement>(`button[aria-label="${t('refresh')}"]`)!.click() })
       await flushEffects()
       expect(ops).toHaveBeenCalledTimes(calls + 1)
+      // No rule may reference the host's private tab classes again (comments may
+      // still name them while explaining why they are gone).
       const sheet = readFileSync('src/client/changes/changes.module.css', 'utf8')
-      expect(sheet).toMatch(/\.head :global\(\.wSkVaW_tabs\) \{ gap: 24px; \}/)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+      expect(sheet).not.toContain('wSkVaW')
+      expect(sheet).toMatch(/\.segmented \{/)
     } finally {
       act(() => { root.unmount() })
       container.remove()
@@ -571,6 +589,10 @@ describe('ChangesTab', () => {
         .map(node => node.textContent)
       expect(empties).toEqual([t('changesClean')])
       expect(container.querySelector('[aria-labelledby$="-session"]')!.textContent).toContain(t('changesSessionEmpty'))
+      // The Graph starts folded (the change list is the primary surface); its
+      // empty state renders once the user unfolds it.
+      const graphDisclosure = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
+      await act(async () => { graphDisclosure.click() })
       expect(container.querySelector('[data-scm-section="graph"]')!.textContent).toContain(t('graphEmpty'))
       // No resource group or tree row is rendered when nothing changed.
       expect(container.querySelectorAll('[data-group]')).toHaveLength(0)
@@ -695,14 +717,16 @@ describe('ChangesTab', () => {
       mount(root)
       await flushEffects()
       const refreshSelector = `button[aria-label="${t('refresh')}"]`
-      const head = container.querySelector('[role="tablist"]')!.parentElement!
+      // The lens switch moves with the lens: in the Git lens's chip row while
+      // that lens shows, in the tab's own header row while the session lens
+      // does. `switchParent()` is therefore re-read after every switch.
+      const switchParent = (): HTMLElement => container.querySelector('[data-lens-switch]')!.parentElement!
       const gitPanel = (): HTMLElement => [...container.querySelectorAll<HTMLElement>('[role="tabpanel"]')]
         .find(node => node.id.endsWith('-git-panel'))!
-      // Git has one refresh, inside the lens's docked chip row rather than
-      // beside the lens tabs; the session lens's own action lives in the
-      // header instead.
-      expect(head.querySelector(refreshSelector)).toBeNull()
-      expect(gitPanel().querySelectorAll(refreshSelector)).toHaveLength(1)
+      // With the Git lens on screen the switch sits INSIDE the chip toolbar,
+      // and the only refresh in the whole tab is that toolbar's own.
+      expect(switchParent().closest('[data-git-toolbar]')).not.toBeNull()
+      expect(container.querySelectorAll(refreshSelector)).toHaveLength(1)
       expect(container.querySelector(`[data-git-toolbar] ${refreshSelector}`)).not.toBeNull()
       const sessionTab = lensTab(container, t('changesSessionLens'))
       await act(async () => { sessionTab!.click() })
@@ -716,10 +740,12 @@ describe('ChangesTab', () => {
 
       // The header's refresh pulls the delta; the SAME preview must pick the
       // settled payload up without the user re-clicking the row.
+      const head = switchParent()
       const refresh = head.querySelector<HTMLButtonElement>(refreshSelector)
       expect(refresh).not.toBeNull()
       // The header carries the session lens's action, and only one of it (the
       // Git lens keeps its own inside the retained panel above).
+      expect(gitPanel().querySelectorAll(refreshSelector)).toHaveLength(1)
       expect(head.querySelectorAll(refreshSelector)).toHaveLength(1)
       expect(ops).toHaveBeenCalledTimes(1)
       await act(async () => { refresh!.click() })
@@ -741,6 +767,12 @@ describe('ChangesTab', () => {
     const root: Root = createRoot(container)
     try {
       mount(root)
+      await flushEffects()
+
+      // The Graph starts folded; its fetch (and so its failure) happens on
+      // unfold.
+      const graphDisclosure = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
+      await act(async () => { graphDisclosure.click() })
       await flushEffects()
 
       expect(container.textContent).toContain(t('graphLoadError'))
@@ -868,6 +900,9 @@ describe('ChangesTab', () => {
 
       const changes = scroller!.querySelector('[data-scm-section="changes"]')
       const graph = scroller!.querySelector('[data-scm-section="graph"]')
+      // The Graph starts folded; unfold it so its branch filter mounts.
+      const graphDisclosure = graph!.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+      await act(async () => { graphDisclosure.click() })
       // The repo / worktree pickers moved into More Actions (#944), so the
       // Graph section's branch filter is the only select left in the lens.
       const selects = [...container.querySelectorAll('select')]
@@ -877,7 +912,13 @@ describe('ChangesTab', () => {
       const unstaged = changes!.querySelector('[data-group="unstaged"]')
       expect(message!.querySelector('textarea')).not.toBeNull()
       expect(unstaged!.querySelector('[data-path="src/a.ts"]')).not.toBeNull()
-      expect(changes!.querySelector('[data-group="staged"]')).toBeNull()
+      // The staged band keeps its header (title + a zero count) even when it is
+      // empty — a vanished header read as a vanished feature — but it holds no
+      // rows.
+      const stagedBand = changes!.querySelector('[data-group="staged"]')
+      expect(stagedBand).not.toBeNull()
+      expect(stagedBand!.querySelector('[data-count]')!.textContent).toBe('0')
+      expect(stagedBand!.querySelector('[data-path]')).toBeNull()
       expect(message!.compareDocumentPosition(unstaged!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       expect(changes!.compareDocumentPosition(graph!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       const graphRow = graph!.querySelector<HTMLElement>('[data-graph-commit]')
@@ -913,10 +954,17 @@ describe('ChangesTab', () => {
     // with the change list. NO z-index — a stacking toolbar would paint over
     // the floating window's resize grip.
     expect(rule('.gitToolbar')).toContain('flex: none')
+    // A COLUMN: the failed-action notice reports UNDER the chip row instead of
+    // being laid out beside it (a row squeezed the chips into a sliver).
+    expect(rule('.gitToolbar')).toContain('flex-direction: column')
     expect(rule('.gitToolbar')).not.toContain('overflow')
     expect(rule('.gitToolbar')).not.toContain('z-index')
     expect(rule('.toolbarRow')).toContain('flex: 1')
-    expect(rule('.toolbarPills')).toContain('overflow: hidden')
+    // The chips WRAP instead of clipping: `overflow: hidden` used to cut the
+    // branch chip in half on a narrow panel, and that chip is a route to
+    // `checkout()`.
+    expect(rule('.toolbarPills')).toContain('flex-wrap: wrap')
+    expect(rule('.toolbarPills')).not.toContain('overflow: hidden')
     expect(rule('.pill')).toContain('border-radius')
     expect(rule('.messageBox')).not.toMatch(/position|sticky|overflow/)
     expect(sheet).not.toMatch(/\.(?:selectors|select|branchLabel|commitBar|commitRow)\s*\{/)
@@ -952,6 +1000,42 @@ describe('ChangesTab', () => {
       act(() => { root.unmount() })
       container.remove()
       vi.useRealTimers()
+    }
+  })
+
+  it('keeps the lens switch reachable in a workspace with no repository', async () => {
+    // No repo at all: the chip toolbar has nothing to show, but the switch must
+    // still be there — it is the only way back to the session lens.
+    vi.spyOn(api, 'gitWorktrees').mockResolvedValue([])
+    vi.spyOn(api, 'gitStatus').mockResolvedValue({ isRepo: false, entries: [], repositories: [] } as unknown as GitStatusResult)
+    vi.spyOn(api, 'gitBranch').mockResolvedValue({ current: '', names: [] })
+    vi.spyOn(api, 'changesOps').mockResolvedValue({ events: [], lastSeq: 0 })
+
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root: Root = createRoot(container)
+    try {
+      mount(root)
+      await flushEffects()
+
+      const switchRow = (): HTMLElement => container.querySelector<HTMLElement>('[data-lens-switch]')!
+      // The switch rides in the chip band even though the band has no chips.
+      expect(container.querySelector('[data-git-toolbar]')!.contains(switchRow())).toBe(true)
+      expect(container.querySelectorAll('[data-toolbar-pills] [data-git-branch]')).toHaveLength(0)
+
+      await act(async () => { lensTab(container, t('changesSessionLens'))!.click() })
+      await flushEffects()
+      // The session lens has no toolbar, so the switch moves to the tab's own
+      // header row — still reachable, and it can take the user back.
+      expect(switchRow()).not.toBeNull()
+      expect(container.querySelector('[data-git-toolbar]')).toBeNull()
+      expect(switchRow().closest('[data-git-toolbar]')).toBeNull()
+      await act(async () => { lensTab(container, t('changesGitLens'))!.click() })
+      await flushEffects()
+      expect(container.querySelector('[data-git-toolbar]')!.contains(switchRow())).toBe(true)
+    } finally {
+      act(() => { root.unmount() })
+      container.remove()
     }
   })
 })

@@ -88,6 +88,7 @@ it('orders distinct conflict/index/worktree groups, folds independently, and kee
     expect(container.querySelector('[data-git-scroll]')!.contains(toolbar)).toBe(false)
     const changes = container.querySelector<HTMLButtonElement>('[data-scm-section="changes"] button[aria-expanded]')!
     const graph = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
+    await click(graph) // the Graph starts folded; this flow needs its rows mounted
     await write(input(container), 'kept draft')
     await click(changes)
     expect(input(container)).toBeNull()
@@ -252,7 +253,7 @@ it('shows genuine upstream counts, syncs Pull then Push, and never pushes after 
   const pull = vi.spyOn(api, 'gitPull').mockImplementation(async () => { order.push('pull'); return { ok: true } })
   const push = vi.spyOn(api, 'gitPush').mockImplementation(async () => { order.push('push'); return { ok: true } })
   const view = await mount(() => snapshot)
-  const sync = (): HTMLButtonElement => view.container.querySelector<HTMLButtonElement>(`[data-git-toolbar] button[aria-label^="${t('gitSync')}"]`)!
+  const sync = (): HTMLButtonElement => view.container.querySelector<HTMLButtonElement>('[data-git-toolbar] [data-git-sync]')!
   try {
     expect(sync().textContent).toContain('0↓ 1↑')
     expect(sync().title).toContain('origin/main')
@@ -272,10 +273,16 @@ it('shows genuine upstream counts, syncs Pull then Push, and never pushes after 
     expect(vi.mocked(api.gitStatus).mock.calls.length).toBeGreaterThan(statusCalls)
     snapshot = { ...tracked(), upstream: undefined, ahead: undefined, behind: undefined }
     await act(async () => { invalidateGitStatus('scm-A') }); await flush()
-    expect(view.container.querySelector<HTMLButtonElement>('[data-git-toolbar] button[aria-label="No upstream"]')!.disabled).toBe(true)
+    // The chip's accessible name is its visible text (no `aria-label` that
+    // would differ from it, WCAG 2.5.3); the reason a click is unavailable
+    // rides in `title` and in that visible text.
+    expect(sync().title).toBe('No upstream')
+    expect(sync().textContent).toBe('No upstream')
+    expect(sync().disabled).toBe(true)
     snapshot = { ...snapshot, branch: '', detached: true }
     await act(async () => { invalidateGitStatus('scm-A') }); await flush()
-    expect(view.container.querySelector<HTMLButtonElement>('[data-git-toolbar] button[aria-label="Detached HEAD"]')!.disabled).toBe(true)
+    expect(sync().title).toBe('Detached HEAD')
+    expect(sync().disabled).toBe(true)
   } finally { view.unmount() }
 })
 
@@ -287,6 +294,10 @@ it('checks out a plain branch and refreshes placeholder, resources, graph and to
   })
   const view = await mount(() => snapshot)
   try {
+    // The Graph starts folded; unfold it so its own route participates in
+    // the refresh this test asserts.
+    const graphDisclosure = view.container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
+    await click(graphDisclosure)
     expect(input(view.container).placeholder).toBe('Message (Ctrl+Enter to commit on "main")')
     const graphCalls = vi.mocked(api.gitGraph).mock.calls.length
     await click(view.container.querySelector<HTMLButtonElement>('[data-git-toolbar] [data-git-branch]')!)
@@ -388,5 +399,29 @@ it('feeds the header totals from the filtered rows and makes the pinned disclosu
     expect(band().disabled).toBe(false)
     await click(dir())
     expect(dir().getAttribute('aria-expanded')).toBe('false')
+  } finally { view.unmount() }
+})
+
+it('offers every branch as a flat More Actions row — a second route to checkout', async () => {
+  const view = await mount(() => tracked())
+  const checkout = vi.spyOn(api, 'gitCheckout').mockResolvedValue({ ok: true })
+  try {
+    const trigger = view.container.querySelector<HTMLButtonElement>('[data-git-toolbar] [data-git-more]')!
+    // A menu trigger has to announce the menu and its own state (the kit's
+    // IconButton only ever publishes `aria-pressed`).
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    await click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+
+    const rows = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    // Flat rows under their own heading, never a nested submenu card: the host
+    // opens those to the RIGHT, off-screen from a right-docked panel.
+    expect(rows().map(row => row.textContent)).toEqual(expect.arrayContaining(['main', 'feature']))
+    await click(rows().find(row => row.textContent === 'feature')!)
+    await flush()
+    expect(checkout).toHaveBeenCalledExactlyOnceWith({ sessionId: 'scm-A', cwd: CWD }, 'feature', CWD)
+    // Picking a row closes the menu.
+    expect(rows()).toHaveLength(0)
   } finally { view.unmount() }
 })

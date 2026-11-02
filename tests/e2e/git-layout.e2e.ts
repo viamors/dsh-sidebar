@@ -119,7 +119,7 @@ function rowGeometryProblems(page: Page, expected: SelectedRow | null): Promise<
 /** Open the Git guide entry and wait for the SCM body (never the control twice:
  *  the expand control is gone once the sidebar is open). */
 async function openGitPage(page: Page): Promise<void> {
-  await expect(page.locator('[data-dsh-better-sidebar]')).toBeAttached({ timeout: 90_000 })
+  await expect(page.locator('[data-vimors-dsh-sidebar]')).toBeAttached({ timeout: 90_000 })
   await dismissOnboarding(page)
   await sendFirstMessage(page)
   await page.locator('[data-sidebar-right-expand]').first().click()
@@ -164,6 +164,9 @@ test('a selected change row stays an in-flow band inside its group', async ({ pa
     // Nothing selected yet: every row is already an in-flow band in its group.
     await expect(page.locator('[data-group="merge"] [data-row="src/app/main.ts"]')).toBeVisible()
     await expect(page.locator('[data-group="staged"] [data-row="src/app/util.ts"]')).toBeVisible()
+    // The Graph starts folded (the change list is the primary surface).
+    const graphDisclosure = page.locator('[data-scm-section="graph"] button[aria-expanded]')
+    if (await graphDisclosure.getAttribute('aria-expanded') === 'false') await graphDisclosure.click()
     await expect(page.locator('[data-graph-commit]')).toHaveCount(3)
     await expect.poll(() => rowGeometryProblems(page, null), { timeout: 10_000 }).toEqual([])
 

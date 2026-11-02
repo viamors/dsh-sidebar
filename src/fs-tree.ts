@@ -23,7 +23,7 @@ import { basename, dirname, isAbsolute, resolve, sep } from 'node:path'
 import { SidebarError } from './wire.ts'
 import type { ExcludeMatcher } from './exclude-patterns.ts'
 import { bridgeToWindowsHostPath, drvFsToWindowsPath, isDrvFsPath, isWslUncPath, normalizeWslUncForWindows } from './wsl-path.ts'
-import { isWslEnumerationCandidate, listDirectoryViaWsl, rowsFromWslEntries } from './wsl-listing.ts'
+import { listDirectoryViaWsl, rowsFromWslEntries, shouldFallBackToWslListing } from './wsl-listing.ts'
 
 /** One explorer row. */
 export interface SidebarFsEntry {
@@ -177,7 +177,13 @@ async function readDirectory(path: string, maxEntries: number, exclude?: Exclude
     // spawn even at 10k entries (~30ms vs ~150ms), so the Linux-side pass is
     // a RESILIENCE fallback for a broken 9P session — not the default. A
     // distro-side failure rethrows the original native error.
-    if (isWslEnumerationCandidate(path)) {
+    //
+    // Only a SHARE-level failure qualifies: `ENOENT`/`ENOTDIR`/`EACCES` mean
+    // the path itself is missing or is not a directory, which the Linux-side
+    // pass would answer identically — after paying a `wsl.exe` spawn (a cold
+    // distro boot on a stopped one) to learn nothing. The client polls stale
+    // paths constantly, so that spawn was the common case, not the rare one.
+    if (shouldFallBackToWslListing(nativeError, path)) {
       const entries = await listDirectoryViaWsl(path)
       if (entries !== undefined) {
         const { rows, truncated } = rowsFromWslEntries(path, entries, maxEntries, exclude)

@@ -1,12 +1,12 @@
-# dsh-better-sidebar bundle patch
+# @vimors/dsh-sidebar bundle patch
 #
 # This file is the `dsh.bundle.patch` layer of the published npm package: when
 # the plugin is installed through the official CLI —
 #
-#   dsh plugin --profile <name> add dsh-better-sidebar@<version>
+#   dsh plugin --profile <name> add @vimors/dsh-sidebar@<version>
 #
 # — the command reconciles `dsh.profile.bundles` against installed packages
-# and, seeing this declaration, appends `dsh-better-sidebar` to the bundle
+# and, seeing this declaration, appends `@vimors/dsh-sidebar` to the bundle
 # stack. The profile boot then merges THIS patch (a single `insert` of the
 # plugin row) exactly like the manual cordis.patch.yml mount line used
 # before. No profile file edits needed — one command installs and mounts.
@@ -21,14 +21,14 @@
 #
 #   - insert:
 #       - id: better-sidebar
-#         name: 'dsh-better-sidebar'
+#         name: '@vimors/dsh-sidebar'
 #
 # Aggregate double-mount guard: aggregate bundles (e.g. @linxin666/dsh-web-ui-all)
 # may already mount this package under their own entry id (e.g.
 # `web-ui-better-sidebar`). Two mounts register /sidebar/api twice and fail the
 # whole plugin tree at boot ("duplicate prefix route"). The `!!js` disabled
 # expression backs THIS row off when another *enabled* entry already mounts
-# `dsh-better-sidebar`; the aggregate instance then owns the sidebar. The
+# `@vimors/dsh-sidebar`; the aggregate instance then owns the sidebar. The
 # loader evaluates it when this row is processed (entry-list order, only rows
 # before this one are visible), so the aggregate bundle must precede this one
 # in `dsh.profile.bundles` — the standard install order, since `dsh plugin add`
@@ -38,5 +38,5 @@
 # fail loudly at the loader as before.
 - insert:
     - id: better-sidebar
-      name: 'dsh-better-sidebar'
-      disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === 'dsh-better-sidebar' && e.options.id !== 'better-sidebar' && !e.disabled)"
+      name: '@vimors/dsh-sidebar'
+      disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === '@vimors/dsh-sidebar' && e.options.id !== 'better-sidebar' && !e.disabled)"

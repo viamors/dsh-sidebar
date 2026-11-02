@@ -261,6 +261,25 @@ export function wslRemoteEditorUrl(
     throw new SidebarError('internal', 'WSL_DISTRO_NAME is unavailable; cannot build a Remote-WSL editor URL', 500)
   }
 
+  // A single-slash POSIX path (`file:///home/u/x.ts`) — the spelling the
+  // built-in link builder emits. It used to fall straight through to `return
+  // url`, so a Windows host handed `/home/u/x.ts` to the OS and the editor
+  // opened `C:\home\u\x.ts` (the double-slash spelling below was the only one
+  // repaired). Only a Windows host reinterprets it: elsewhere `file:///home/...`
+  // is already the correct local URL, and `file:///C:/...` is a drive path,
+  // never a distro path.
+  if (platform === 'win32' && /^\/(?!\/)/.test(rawPath) && !/^\/[a-zA-Z]:([\\/]|$)/.test(rawPath)) {
+    const distro = distroName.trim()
+    if (distro !== '') return toVscodeRemoteWslUrl(scheme, distro, rawPath)
+    const bridged = parseWslUncPath(bridgeToWindowsHostPath(rawPath, undefined, { platform }))
+    if (bridged !== undefined) {
+      return toVscodeRemoteWslUrl(scheme, bridged.distro, bridged.linuxPath)
+    }
+    // A path no distro can claim (e.g. a `/foo` fragment): leave the URL alone
+    // rather than failing an open that may still be legitimate.
+    return url
+  }
+
   return url
 }
 

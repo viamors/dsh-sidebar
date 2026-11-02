@@ -419,10 +419,15 @@ export interface GitLensProps {
   /** The tab's context, for the registered file/folder icon chain (absent →
    *  the host's built-in artwork, exactly like the file tree falls back). */
   ctx?: Context
+  /** The tab's lens switcher (Git / this round's files). The tab owns the
+   *  control because it owns the lens state; the git lens only decides where it
+   *  sits — first in the chip row, so the segmented control and the chips read
+   *  as one band instead of two stacked toolbars. */
+  lensSwitch?: ReactNode
 }
 
 export function GitLens(props: GitLensProps) {
-  const { scope, onOpenFile, onPreview, selectedRef, visible, active = visible, ctx } = props
+  const { scope, onOpenFile, onPreview, selectedRef, visible, active = visible, ctx, lensSwitch } = props
 
   const service = ctx?.get('betterSidebar')
   /** The file row's artwork: a registered icon wins, else the host's own
@@ -443,9 +448,9 @@ export function GitLens(props: GitLensProps) {
     () => (repoRoot === undefined ? scope : { ...scope, repoRoot }),
     [scope, repoRoot],
   )
-  /** Every repository of the session workspace, kept once discovered: the
-   *  status of a SELECTED child reports only itself, so the selector's option
-   *  list cannot be re-derived from the current snapshot alone. */
+  /** Every repository of the session workspace: the chip and the More menu read
+   *  it, and the status snapshot reports the whole discovery on every tick —
+   *  the repo selector's options are therefore re-derivable from the answer. */
   const [repoChoices, setRepoChoices] = useState<string[]>([])
   const [branchNames, setBranchNames] = useState<string[]>([])
   /** Bumped by every explicit refresh, the repo/worktree switch and the
@@ -457,7 +462,10 @@ export function GitLens(props: GitLensProps) {
    *  Typing NARROWS the groups in place — the same rows, their directories
    *  pruned — instead of opening a second, differently-shaped result list. */
   const [filter, setFilter] = useState('')
-  const [graphOpen, setGraphOpen] = useState(true)
+  /** The Graph starts folded: the change list is the primary surface, and an
+   *  open graph would fire its first `git.graph` page on every mount even
+   *  when the user never scrolls to it. */
+  const [graphOpen, setGraphOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [branchOpen, setBranchOpen] = useState(false)
   const [repoOpen, setRepoOpen] = useState(false)
@@ -591,7 +599,11 @@ export function GitLens(props: GitLensProps) {
   const snapshot: GitStatusResult | null = status.snapshot ?? lastStatus.current.value
   useEffect(() => {
     const repositories = snapshot?.repositories
-    if (repositories !== undefined && repositories.length > 1) setRepoChoices(repositories)
+    // `repositories` is the whole DISCOVERY of the session cwd, whatever child
+    // is selected (see `status()` in src/git.ts), so the answer is the truth:
+    // a workspace that dropped back to ONE repository must clear the list too,
+    // or the chip keeps offering a repository that no longer exists.
+    if (repositories !== undefined) setRepoChoices(repositories.length > 1 ? repositories : [])
   }, [snapshot])
 
   /** Select one checkout (or none) and remember the choice synchronously. */
@@ -608,6 +620,10 @@ export function GitLens(props: GitLensProps) {
     setSuggesting(false)
     setCommitting(false)
     setBranchNames([])
+    // A needle typed against the previous checkout (or the previous session)
+    // must not silently keep hiding rows of the one that took over: the filter
+    // is a view of THIS change list, not a global preference.
+    setFilter('')
     setGraphRefresh(value => value + 1)
     setActionError(null)
     setFileMenu(null)
@@ -750,6 +766,13 @@ export function GitLens(props: GitLensProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible])
 
+  // Folding the change list takes the filter box — and with it the only way to
+  // clear the needle — off screen. A needle that kept pruning the groups while
+  // its own UI was gone read as "the groups are broken" on the way back in.
+  useEffect(() => {
+    if (!changesOpen) setFilter('')
+  }, [changesOpen])
+
   /** The inventory poll: a linked checkout created mid-session shows up
    *  without a manual refresh (the status poll itself belongs to the store). */
   const pollInventory = useCallback((signal: AbortSignal): Promise<void> => refresh(true, signal), [refresh])
@@ -798,9 +821,18 @@ export function GitLens(props: GitLensProps) {
     // With conflicts, directory/all actions must only touch their own group:
     // git add/reset on the whole directory would silently resolve/reset Merge.
     const rows = staged ? stagedEntries : merge || mergeEntries.some(entry => entry.path === path) ? mergeEntries : unstagedEntries
-    const paths = mergeEntries.length === 0 ? [path] : rows
-      .filter(entry => path === undefined || entry.path === path || entry.path.startsWith(`${path}/`))
-      .map(entry => entry.path)
+    // An explicit path list, never a bare `git add -A`: a group action must
+    // stage exactly the rows the group shows (a truncated snapshot, a filter or
+    // a conflict side all hide rows that `-A` would have swept in anyway), and
+    // `git add -- <path>` records a removal too, so a deleted file stages the
+    // same way. Same shape as the directory rows above, which already resolve
+    // to their subtree's paths.
+    const paths = path !== undefined && mergeEntries.length === 0
+      ? [path]
+      : rows
+        .filter(entry => path === undefined || entry.path === path || entry.path.startsWith(`${path}/`))
+        .map(entry => entry.path)
+    if (paths.length === 0) return
     void runAction(async () => {
       for (const selectedPath of paths) {
         if (staged) await api.gitUnstage(gitScope, selectedPath, target)
@@ -1049,17 +1081,35 @@ export function GitLens(props: GitLensProps) {
     : snapshot.ahead === undefined || snapshot.behind === undefined ? t('gitSyncUnavailable')
     : `${t('gitSync')}: ${snapshot.upstream} · ${snapshot.behind}↓ ${snapshot.ahead}↑`
 
-  /** Rows of the More Actions menu. Checkouts and worktrees are FLAT rows
-   *  under their own headings, never nested `submenu` cards: the host card
+  /** Rows of the More Actions menu. Checkouts, branches and worktrees are FLAT
+   *  rows under their own headings, never nested `submenu` cards: the host card
    *  opens to the RIGHT, which is off-screen from a panel pinned to the
    *  window's right edge (the row looked dead — a click "did nothing"), and a
    *  menu carrying a submenu row also forfeits the host's viewport-fit scroll,
    *  so a container with 50+ child repositories ran off the screen. Flat rows
-   *  keep the card scrollable and every row clickable. */
+   *  keep the card scrollable and every row clickable.
+   *
+   *  The BRANCH rows are a deliberate SECOND route to `checkout()`: the branch
+   *  chip is the first one, and a narrow panel can clip the chip row (see
+   *  `.toolbarPills`), so the menu has to be able to switch branch on its own.
+   *  Memoized: this array is the menu's whole prop surface, and the git poll
+   *  re-renders this component every couple of seconds. */
   const currentWorktree = selectedWorktree ?? primaryWorktree
-  const moreItems: MenuEntry[] = [
-    { id: 'pull', label: t('pull'), disabled: busy || suggesting || snapshot?.detached === true },
-    { id: 'push', label: t('push'), disabled: busy || suggesting || snapshot?.detached === true },
+  const currentRepoRoot = repoRoot ?? snapshot?.root ?? repoChoices[0] ?? ''
+  const currentRepoLabel = baseName(currentRepoRoot) || currentRepoRoot
+  const detached = snapshot?.detached === true
+  const moreItems = useMemo<MenuEntry[]>(() => [
+    { id: 'pull', label: t('pull'), disabled: busy || suggesting || detached },
+    { id: 'push', label: t('push'), disabled: busy || suggesting || detached },
+    ...(branchNames.length > 0 ? [
+      { type: 'separator', id: 'more-branches-separator' } satisfies MenuEntry,
+      { type: 'label', id: 'more-branches-label', text: t('branch') } satisfies MenuEntry,
+      ...branchNames.map((name): MenuEntry => ({
+        id: `branch:${name}`,
+        label: name,
+        disabled: busy || suggesting,
+      })),
+    ] : []),
     ...(repoChoices.length > 1 ? [
       { type: 'separator', id: 'more-repos-separator' } satisfies MenuEntry,
       { type: 'label', id: 'more-repos-label', text: t('gitRepository') } satisfies MenuEntry,
@@ -1078,7 +1128,15 @@ export function GitLens(props: GitLensProps) {
         disabled: busy || suggesting,
       })),
     ] : []),
-  ]
+  ], [branchNames, busy, detached, repoChoices, suggesting, worktrees])
+
+  /** The rows that carry the host's own check mark: the active branch, the
+   *  active checkout and the active worktree. */
+  const moreSelectedIds = useMemo(() => [
+    ...(branch !== '' ? [`branch:${branch}`] : []),
+    ...(currentRepoRoot !== '' ? [`repo:${currentRepoRoot}`] : []),
+    ...(currentWorktree === undefined ? [] : [`worktree:${currentWorktree}`]),
+  ], [branch, currentRepoRoot, currentWorktree])
 
   /** Fold or unfold one directory row (keyed per group, see `collapsed`).
    *  Stable: it is a memoized row's prop. */
@@ -1169,9 +1227,14 @@ export function GitLens(props: GitLensProps) {
     </div>
   )
 
-  const renderGroup = (id: string, label: string, nodes: readonly ChangeNode[], staged: boolean, merge = false): ReactNode => {
+  /** One band of the changes list. `always` keeps the band's header (title +
+   *  count) even when the band is empty: "staged" and "unstaged" are the two
+   *  halves a reader reasons about, and a header that disappears when the half
+   *  is empty reads as a feature that disappeared. The merge band stays
+   *  conditional — it only exists while a conflicted merge is in progress. */
+  const renderGroup = (id: string, label: string, nodes: readonly ChangeNode[], staged: boolean, merge = false, always = false): ReactNode => {
     const count = countChangeFiles(nodes)
-    if (count === 0) return null
+    if (count === 0 && !always) return null
     const key = `group:${id}`
     const open = needle !== '' ? true : !collapsed.has(key)
     // The band totals (#131) follow the rows actually printed: while filtering
@@ -1192,24 +1255,16 @@ export function GitLens(props: GitLensProps) {
             {label}
             {totals !== undefined && totals.files > 0 && <PlusMinus additions={totals.additions} deletions={totals.deletions} note="group" />}
           </button>
-          <IconButton className={css.headerAction} size="sm" disabled={busy || suggesting}
+          <IconButton className={css.headerAction} size="sm" disabled={busy || suggesting || count === 0}
             label={staged ? t('unstageAll') : t('stageAll')}
             icon={staged ? MINUS_ICON : <IconPlusOutlineRegular size={12} />}
             onClick={() => { stageAll(staged, merge) }} />
           <span className={css.countPill} data-count={count}>{count}</span>
         </div>
-        {open && renderTree(nodes, staged, merge)}
+        {open && count > 0 && renderTree(nodes, staged, merge)}
       </div>
     )
   }
-
-  const currentRepoRoot = repoRoot ?? snapshot?.root ?? repoChoices[0] ?? ''
-  const currentRepoLabel = baseName(currentRepoRoot) || currentRepoRoot
-  /** The active checkout / worktree rows, marked with the host's own check. */
-  const moreSelectedIds = [
-    ...(currentRepoRoot !== '' ? [`repo:${currentRepoRoot}`] : []),
-    ...(currentWorktree !== undefined ? [`worktree:${currentWorktree}`] : []),
-  ]
 
   return (
     <div className={css.git} data-git-root>
@@ -1217,11 +1272,19 @@ export function GitLens(props: GitLensProps) {
         The chip row, docked at the top: repo · branch (+N −M) · upstream, then
         the action cluster. A sibling of the scroller, so it stays usable with
         both sections folded, and the only place the docked controls live —
-        one row, one place to look.
+        one row, one place to look. The band itself also renders in a NON-repo
+        workspace when the tab hands in a `lensSwitch`: the switch must never
+        be trapped behind `isRepo` (a workspace without a repo would lose the
+        only way back to the session lens).
       */}
-      {isRepo && <div className={css.gitToolbar} data-git-toolbar>
+      {(isRepo || lensSwitch !== undefined) && <div className={css.gitToolbar} data-git-toolbar>
         <div className={css.toolbarRow} data-toolbar-row>
-          <div className={css.toolbarPills}>
+          {/* The lens switch (Git / this round's files) rides in the same
+              visual band, ahead of the chips: one control row, whichever lens
+              is showing. Rendered by the tab, which owns the state. */}
+          {lensSwitch !== undefined && <div className={css.lensSwitch}>{lensSwitch}</div>}
+          {isRepo && <>
+          <div className={css.toolbarPills} data-toolbar-pills>
             {repoChoices.length > 1 && (
               <Menu open={repoOpen} onClose={() => { setRepoOpen(false) }} portal compact align="start" autoFocus
                 className={css.pillMenu}
@@ -1271,8 +1334,12 @@ export function GitLens(props: GitLensProps) {
                 genuine ahead/behind counts beside it; the chip itself is the
                 sync action (pull then push), so one click does the whole
                 round trip. Pull and push alone are the cluster's own buttons. */}
+            {/* The chip is the sync action (pull then push), so one click does
+                the whole round trip. Its accessible name is its visible text —
+                an `aria-label` that said something else would break WCAG 2.5.3
+                (the visible label would no longer be part of the name). */}
             <button type="button" className={css.pill} data-git-sync
-              aria-label={syncLabel} title={syncLabel} disabled={!canSync} onClick={sync}>
+              title={syncLabel} disabled={!canSync} onClick={sync}>
               <span>{snapshot?.upstream !== undefined ? `${branchLabel} → ${snapshot.upstream}` : syncLabel}</span>
               {snapshot?.upstream !== undefined && snapshot.ahead !== undefined && snapshot.behind !== undefined && (
                 <span className={css.pillCounts}>{`${snapshot.behind}↓ ${snapshot.ahead}↑`}</span>
@@ -1280,15 +1347,23 @@ export function GitLens(props: GitLensProps) {
             </button>
           </div>
           <div className={css.toolbarActions} data-toolbar-actions>
+            {/* A native trigger, not the kit's `IconButton`: the kit button
+                only publishes `aria-pressed`, and a menu trigger has to say
+                "this opens a menu" and whether it is open. */}
             <Menu open={moreOpen} onClose={() => { setMoreOpen(false) }} portal compact align="end" autoFocus
-              anchor={<IconButton size="sm" icon={<IconEllipsisOutlineRegular size={14} />} label={t('gitMoreActions')}
-                active={moreOpen} onClick={() => { setMoreOpen(open => !open) }} />}
+              anchor={<button type="button" className={css.toolbarIcon} aria-haspopup="menu" aria-expanded={moreOpen}
+                aria-label={t('gitMoreActions')} title={t('gitMoreActions')} data-git-more
+                data-active={moreOpen ? 'true' : undefined}
+                onClick={() => { setMoreOpen(open => !open) }}>
+                <IconEllipsisOutlineRegular size={14} />
+              </button>}
               items={moreItems}
               selectedIds={moreSelectedIds}
               onSelect={id => {
                 setMoreOpen(false)
                 if (id === 'push') push()
                 else if (id === 'pull') pull()
+                else if (id.startsWith('branch:')) void checkout(id.slice(7))
                 else if (id.startsWith('repo:')) chooseRepo(id.slice(5))
                 else if (id.startsWith('worktree:')) chooseWorktree(id.slice(9))
               }} />
@@ -1301,10 +1376,12 @@ export function GitLens(props: GitLensProps) {
               active={(snapshot?.ahead ?? 0) > 0}
               disabled={busy || suggesting || snapshot?.detached === true} onClick={push} />
             <IconButton size="sm" icon={<IconChecklistOutlineRegular size={14} />} label={t('stageAll')}
-              disabled={busy || suggesting || mergeEntries.length > 0} onClick={() => { stageAll(false) }} />
+              disabled={busy || suggesting || mergeEntries.length > 0 || unstagedEntries.length === 0}
+              onClick={() => { stageAll(false) }} />
             <IconButton size="sm" icon={<IconCheckOutlineRegular size={14} />} label={t('commit')}
               disabled={!canCommit} onClick={commit} />
           </div>
+          </>}
         </div>
         {actionError !== null && <Notice kind="error" tone="inline" role="alert" className={css.actionError}>
           <span className={css.actionErrorText}>{actionError}</span>
@@ -1396,9 +1473,14 @@ export function GitLens(props: GitLensProps) {
               )}
               {clean && <Notice kind="empty">{t('changesClean')}</Notice>}
               {needle !== '' && !clean && matchedCount === 0 && <Notice kind="empty">{t('gitFilterEmpty')}</Notice>}
-              {renderGroup('merge', t('gitMergeChanges'), mergeView, false, true)}
-              {renderGroup('staged', t('gitStagedChanges'), stagedView, true)}
-              {renderGroup('unstaged', t('gitChanges'), unstagedView, false)}
+              {/* Staged and unstaged always print their headers (see
+                  `renderGroup`); a fully clean tree shows the notice alone —
+                  two "0" bands under "No changes" would just be noise. */}
+              {!clean && <>
+                {renderGroup('merge', t('gitMergeChanges'), mergeView, false, true)}
+                {renderGroup('staged', t('gitStagedChanges'), stagedView, true, false, true)}
+                {renderGroup('unstaged', t('gitChanges'), unstagedView, false, false, true)}
+              </>}
             </div>}
           </section>
         )}

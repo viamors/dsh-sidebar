@@ -325,5 +325,5 @@ export function archiveFileName(raw: string, ext: string): string {
 
 /** The temporary archive file's name in the OS temp directory. */
 export function archiveTempName(id: string, ext: string): string {
-  return `dsh-better-sidebar-${id}${ext}`
+  return `@vimors/dsh-sidebar-${id}${ext}`
 }

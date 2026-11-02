@@ -13,7 +13,9 @@ import {
   WSL_WATCH_POLL_SECONDS,
   WSL_WATCH_SCRIPT,
   createWslDirectoryWatcher,
+  resetWslWatchRegistry,
   setWslWatchSpawn,
+  wslWatchCount,
 } from '../src/wsl-watch.ts'
 
 const UNC = '\\\\wsl.localhost\\Ubuntu\\opt\\app'
@@ -39,7 +41,12 @@ function useChild(factory: () => ChildProcess): { argv: string[][] } {
   return { argv }
 }
 
-afterEach(() => { setWslWatchSpawn(undefined) })
+// `live` is module-global on purpose (the budget it enforces is process-wide),
+// so every case must leave it empty or the next case inherits its headroom.
+afterEach(() => {
+  setWslWatchSpawn(undefined)
+  resetWslWatchRegistry()
+})
 
 describe('WSL_WATCH_SCRIPT', () => {
   it('fingerprints the entry list and polls on a fixed interval', () => {
@@ -53,6 +60,14 @@ describe('WSL_WATCH_SCRIPT', () => {
     // WSL2 keeps the loop alive after `wsl.exe` dies; without this the host
     // would leak one orphan poller per watched folder.
     expect(WSL_WATCH_SCRIPT).toContain('kill -0 "$PPID"')
+  })
+
+  it('ends the loop when the watched directory disappears', () => {
+    // `ls | md5sum` reported the pipeline's LAST status, i.e. md5sum's, so a
+    // deleted directory produced a stable fingerprint and the loop polled a
+    // dead path until the host exited.
+    expect(WSL_WATCH_SCRIPT).toContain('|| exit 0')
+    expect(WSL_WATCH_SCRIPT).not.toContain('2>/dev/null | md5sum')
   })
 
   it('caps the number of live loops', () => {
@@ -139,5 +154,25 @@ describe('createWslDirectoryWatcher', () => {
     const onError = vi.fn()
     expect(createWslDirectoryWatcher(UNC, () => {}, onError)).toBeUndefined()
     expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  it('bounds the live loops process-wide, not per caller', () => {
+    // The budget guards OS processes, so a second connection must not get its
+    // own sixteen: the cap lives here, not in fs-watch's per-connection Set.
+    useChild(() => fakeChild().child)
+    const made = Array.from({ length: MAX_WSL_WATCHES }, () =>
+      createWslDirectoryWatcher(UNC, () => {}, () => {}))
+    expect(made.every(watcher => watcher !== undefined)).toBe(true)
+    expect(wslWatchCount()).toBe(MAX_WSL_WATCHES)
+    expect(createWslDirectoryWatcher(UNC, () => {}, () => {})).toBeUndefined()
+  })
+
+  it('frees the budget again when a loop is closed', () => {
+    const fake = fakeChild()
+    useChild(() => fake.child)
+    const watcher = createWslDirectoryWatcher(UNC, () => {}, () => {})
+    expect(wslWatchCount()).toBe(1)
+    watcher?.close()
+    expect(wslWatchCount()).toBe(0)
   })
 })

@@ -183,6 +183,25 @@ describe('wslRemoteEditorUrl', () => {
     expect(wslRemoteEditorUrl('vscode://file//opt/app/f.ts', 'Debian', 'win32'))
       .toBe('vscode://vscode-remote/wsl+Debian/opt/app/f.ts')
   })
+
+  it('bridges a single-slash POSIX path on a Windows host', () => {
+    // `file:///home/u/f.ts` is the spelling the built-in link builder emits.
+    // Only the double-slash form used to be repaired, so a Windows host handed
+    // `/home/u/f.ts` straight to the OS and the editor opened `C:\home\u\f.ts`.
+    expect(wslRemoteEditorUrl('vscode://file/home/u/f.ts', 'Debian', 'win32'))
+      .toBe('vscode://vscode-remote/wsl+Debian/home/u/f.ts')
+    expect(wslRemoteEditorUrl('vscode://file/home/u/f.ts', '', 'win32'))
+      .toMatch(/^vscode:\/\/vscode-remote\/wsl\+[^/]+\/home\/u\/f\.ts$/)
+  })
+
+  it('leaves a single-slash path alone off Windows and for drive paths', () => {
+    // On a Linux host `/home/u/f.ts` is already the correct local URL.
+    expect(wslRemoteEditorUrl('vscode://file/home/u/f.ts', '', 'linux'))
+      .toBe('vscode://file/home/u/f.ts')
+    // `file:///C:/...` is a drive path, never a distro path.
+    expect(wslRemoteEditorUrl('vscode://file/C:/Users/alice/f.ts', '', 'win32'))
+      .toBe('vscode://file/C:/Users/alice/f.ts')
+  })
 })
 
 describe('validateExternalUrl', () => {

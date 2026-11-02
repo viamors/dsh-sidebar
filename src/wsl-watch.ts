@@ -26,6 +26,11 @@ import { parseWslUncPath } from './wsl-path.ts'
  * process — far heavier than an `fs.watch` handle — so the cap is an order
  * below fs-watch's handle budget; readers expanding more WSL folders than
  * this simply stop gaining watchers until one collapses.
+ *
+ * The budget is PROCESS-wide, not per connection: it bounds OS processes, and
+ * a per-connection count let N open windows run N × this many loops. Enforced
+ * here ({@link createWslDirectoryWatcher}) so every caller is bounded, not
+ * only fs-watch's.
  */
 export const MAX_WSL_WATCHES = 16
 
@@ -47,7 +52,12 @@ export const WSL_WATCH_SCRIPT = [
   // relay process `wsl.exe` spawned — and exits as soon as it is gone, which
   // is what stops a crashed host from leaving one orphan poller per folder.
   '  kill -0 "$PPID" 2>/dev/null || exit 0',
-  '  cur=$(ls -1A -- "$1" 2>/dev/null | md5sum)',
+  // `ls` failing means the directory itself is gone (or unreadable): end the
+  // loop so the host drops the folder. Piping straight into `md5sum` hid that
+  // status — the pipeline's exit code is md5sum's — so a deleted directory
+  // used to report one phantom change and then poll a dead path forever.
+  '  cur=$(ls -1A -- "$1" 2>/dev/null) || exit 0',
+  '  cur=$(printf %s "$cur" | md5sum)',
   '  if [ -n "$prev" ] && [ "$cur" != "$prev" ]; then echo changed; fi',
   '  prev="$cur"',
   `  sleep ${WSL_WATCH_POLL_SECONDS}`,
@@ -63,6 +73,19 @@ export interface WslDirectoryWatcher {
 /** Live WSL loops, tracked so process exit can reap them. */
 const live = new Set<ChildProcess>()
 let exitHookInstalled = false
+
+/**
+ * How many WSL watch loops are alive right now, across every caller.
+ * @returns the process-wide live-loop count.
+ */
+export function wslWatchCount(): number {
+  return live.size
+}
+
+/** Test-only: forget the live-loop registry so a spec starts from a clean cap. */
+export function resetWslWatchRegistry(): void {
+  live.clear()
+}
 
 /**
  * The spawn the watch loop uses. A seam so the loop's contract (change
@@ -111,6 +134,10 @@ export function createWslDirectoryWatcher(
 ): WslDirectoryWatcher | undefined {
   const parsed = parseWslUncPath(dir)
   if (parsed === undefined) return undefined
+  // The cap lives here, not only in fs-watch: the resource is a process, so
+  // every caller must be bounded by it (and a per-connection count would let
+  // N open windows run N × MAX_WSL_WATCHES loops).
+  if (live.size >= MAX_WSL_WATCHES) return undefined
   let child: ChildProcess
   try {
     // `bash -c <script> _ <linuxPath>`: the `_` occupies $0, the Linux path

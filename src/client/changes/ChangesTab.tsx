@@ -2,8 +2,11 @@
  * The unified changes tab: one tab, two lenses on "what changed?" — Git
  * (repository truth: staged/unstaged files, commit box, history) and the
  * session round (agent truth: every file the model read, wrote, or edited).
- * A 36px header carries the host conversation Tabs and the current
- * lens's refresh action; both lenses preview their selections in a shared
+ * The Git / session switch is a segmented control from this plugin's own
+ * sheet: it rides in the Git lens's chip toolbar while that lens shows, and in
+ * a 36px header row (with the session lens's refresh action) while the session
+ * lens does — so it is reachable from either lens and never behind an empty
+ * row. Both lenses preview their selections in a shared
  * resizable bottom pane ({@link DiffPane}), and git targets expand into the
  * dedicated diff tab docked in the workbench's diff pane. The bottom pane is
  * ONE region with a tab strip when a Git Graph commit supplies a second view:
@@ -83,6 +86,10 @@ export function ChangesTab({ ctx, store, scope, tab, visible, onOpenFile, onOpen
   const meta = (tab.meta ?? {}) as ChangesMeta
   const lensId = useId()
   const [lens, setLens] = useState<Lens>(meta.lens === 'session' ? 'session' : 'git')
+  /** Set by a user pick, consumed by the effect below: the switch lives in the
+   *  Git lens's toolbar for one lens and in this tab's header for the other, so
+   *  the clicked segment is unmounted and focus has to be restored. */
+  const lensFocusRef = useRef(false)
   const [selection, setSelection] = useState<PreviewSelection | null>(null)
   /** The Git Graph's selected commit (its card + the ref tones it needs), or
    *  null while nothing is selected there. Null keeps the pane diff-only. */
@@ -208,9 +215,57 @@ export function ChangesTab({ ctx, store, scope, tab, visible, onOpenFile, onOpen
 
   const chooseLens = (next: Lens): void => {
     if (next === lens) return
+    lensFocusRef.current = true
     setLens(next)
     patchMeta({ lens: next })
   }
+
+  /** Put focus back on the active segment after a lens pick (see
+   *  `lensFocusRef`): the segment the user clicked no longer exists. */
+  useEffect(() => {
+    if (!lensFocusRef.current) return
+    lensFocusRef.current = false
+    document.getElementById(`${lensId}-${lens}`)?.focus()
+  }, [lens, lensId])
+
+  /** The Git / session switch. A segmented control from this plugin's own
+   *  sheet — the host's `wSkVaW_tab*` classes were private and are gone from
+   *  the installed kit, which left two browser-default buttons behind. It is
+   *  rendered in the Git lens's chip toolbar when the Git lens is showing and
+   *  in this tab's header row when the session lens is (that lens has no
+   *  toolbar), so the switch is reachable from either side. */
+  const lensSwitch = (
+    <div className={css.segmented} role="tablist" aria-label={t('changes')} data-lens-switch>
+      {(['git', 'session'] as const).map(value => {
+        const active = lens === value
+        return (
+          <button
+            key={value}
+            id={`${lensId}-${value}`}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            aria-controls={`${lensId}-${value}-panel`}
+            tabIndex={active ? 0 : -1}
+            data-lens-option={value}
+            className={`${css.segment}${active ? ` ${css.segmentActive}` : ''}`}
+            onClick={() => { chooseLens(value) }}
+            onKeyDown={event => {
+              let next: Lens
+              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') next = value === 'git' ? 'session' : 'git'
+              else if (event.key === 'Home') next = 'git'
+              else if (event.key === 'End') next = 'session'
+              else return
+              event.preventDefault()
+              chooseLens(next)
+            }}
+          >
+            {t(value === 'git' ? 'changesGitLens' : 'changesSessionLens')}
+          </button>
+        )
+      })}
+    </div>
+  )
 
   /** Preview one git change (worktree file or commit) from the Git lens. */
   const previewGit = (ref: SidebarDiffRef): void => {
@@ -247,46 +302,21 @@ export function ChangesTab({ ctx, store, scope, tab, visible, onOpenFile, onOpen
 
   return (
     <div className={css.root}>
-      <div className={css.head}>
-        {/* ponytail: conversation Tabs are private in DSH 0.2.0-rc.2; reuse
-            their CSS classes until the host exports the component. */}
-        <div className="wSkVaW_tabs" role="tablist" aria-label={t('changes')}>
-          {(['git', 'session'] as const).map(value => (
-            <button
-              key={value}
-              id={`${lensId}-${value}`}
-              type="button"
-              role="tab"
-              aria-selected={lens === value}
-              aria-controls={`${lensId}-${value}-panel`}
-              tabIndex={lens === value ? 0 : -1}
-              className={`wSkVaW_tab${lens === value ? ' wSkVaW_tabActive' : ''}`}
-              onClick={() => { chooseLens(value) }}
-              onKeyDown={event => {
-                let next: Lens
-                if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') next = value === 'git' ? 'session' : 'git'
-                else if (event.key === 'Home') next = 'git'
-                else if (event.key === 'End') next = 'session'
-                else return
-                event.preventDefault()
-                chooseLens(next)
-                event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[id="${lensId}-${next}"]`)?.focus()
-              }}
-            >
-              {t(value === 'git' ? 'changesGitLens' : 'changesSessionLens')}
-            </button>
-          ))}
-        </div>
-        {/* The Git lens refreshes from its own Changes header (#944); only the
-            session lens needs the tab-level action. */}
-        {lens === 'session' && <IconButton
+      {/* The session lens has no toolbar of its own, so the switch (and the
+          tab-level refresh, which only that lens needs — the Git lens refreshes
+          from its own chip band, #944) ride in this row. The Git lens gets the
+          same switch inside its toolbar instead, so no row is rendered when it
+          would hold nothing. */}
+      {lens === 'session' && <div className={css.head}>
+        {lensSwitch}
+        <IconButton
           className={css.headAction}
           size="sm"
           icon={<IconRefreshOutlineRegular size={14} />}
           label={t('refresh')}
           onClick={() => { void pull() }}
-        />}
-      </div>
+        />
+      </div>}
       {/* Both lenses stay MOUNTED and only the active one is shown: the Git
           lens then keeps its expanded groups, its commit draft and the Graph
           section's scroll and selection while the session lens is on screen
@@ -300,6 +330,7 @@ export function ChangesTab({ ctx, store, scope, tab, visible, onOpenFile, onOpen
           store={store}
           visible={visible}
           active={lens === 'git'}
+          lensSwitch={lens === 'git' ? lensSwitch : undefined}
           onOpenFile={onOpenFile ?? (() => { /* no-op */ })}
           onPreview={previewGit}
           selectedRef={previewTarget !== null && previewTarget.kind === 'git' ? previewTarget.ref : null}

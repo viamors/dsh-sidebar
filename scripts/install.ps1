@@ -1,8 +1,8 @@
 ﻿## =============================================================================
-# dsh-better-sidebar 一键安装脚本（官方 CLI 方式，Windows PowerShell 5.1+ / pwsh）
+# @vimors/dsh-sidebar 一键安装脚本（官方 CLI 方式，Windows PowerShell 5.1+ / pwsh）
 #
 # 通过 DSH 官方插件命令安装 npm 包并自动挂载：
-#   dsh plugin --profile web add dsh-better-sidebar@<version>
+#   dsh plugin --profile web add @vimors/dsh-sidebar@<version>
 #
 # 包内声明了 dsh.bundle.patch（cordis.patch.yml）：CLI 的 bundle 协调会把它
 # 自动加进 profile 的 dsh.profile.bundles，下次启动即挂载——无需手动写
@@ -11,10 +11,10 @@
 #
 # 用法（任选其一）：
 #   # 默认最新版
-#   $script = (irm 'https://raw.githubusercontent.com/omdsh-dev/DSH-better-sidebar/main/scripts/install.ps1').TrimStart([char]0xFEFF)
+#   $script = (irm 'https://raw.githubusercontent.com/viamors/dsh-sidebar/main/scripts/install.ps1').TrimStart([char]0xFEFF)
 #   & ([scriptblock]::Create($script))
 #   # 指定版本 / 装完重启
-#   $script = (irm 'https://raw.githubusercontent.com/omdsh-dev/DSH-better-sidebar/main/scripts/install.ps1').TrimStart([char]0xFEFF)
+#   $script = (irm 'https://raw.githubusercontent.com/viamors/dsh-sidebar/main/scripts/install.ps1').TrimStart([char]0xFEFF)
 #   & ([scriptblock]::Create($script)) -Version 0.10.2 -Restart
 #   # 本地保存后运行
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Version 0.10.2 -DryRun
@@ -43,7 +43,7 @@ param(
   [string]$Profile = 'web'
 )
 
-$PKG = 'dsh-better-sidebar'
+$PKG = '@vimors/dsh-sidebar'
 $REGISTRY = if ($env:REGISTRY) { $env:REGISTRY } else { 'https://registry.npmjs.org' }
 
 # DSH_HOME：DSH_HOME 环境变量 > %USERPROFILE% > $HOME
@@ -97,11 +97,11 @@ const fs = require("fs");
 const p = process.argv[2];
 let t = fs.readFileSync(p, "utf8");
 const before = t;
-if (!/^\s*-\s+dsh-better-sidebar\s*$/m.test(t)) {
+if (!/^\s*-\s+@vimors/dsh-sidebar\s*$/m.test(t)) {
   if (/^\s*minimumReleaseAgeExclude:\s*$/m.test(t)) {
-    t = t.replace(/^(\s*minimumReleaseAgeExclude:\s*)$/m, "$1\n  - dsh-better-sidebar");
+    t = t.replace(/^(\s*minimumReleaseAgeExclude:\s*)$/m, "$1\n  - @vimors/dsh-sidebar");
   } else {
-    t += "\nminimumReleaseAgeExclude:\n  - dsh-better-sidebar\n";
+    t += "\nminimumReleaseAgeExclude:\n  - @vimors/dsh-sidebar\n";
   }
 }
 if (t !== before) fs.writeFileSync(p, t);
@@ -190,7 +190,7 @@ if ($addCode -ne 0) {
 $pkgJson = Get-Content -Raw (Join-Path $PROFILE_DIR 'package.json') | ConvertFrom-Json
 $bundles = $pkgJson.dsh.profile.bundles
 if ($bundles -notcontains $PKG) {
-  Warn 'dsh-better-sidebar 未出现在 dsh.profile.bundles 中——挂载未注册。'
+  Warn '@vimors/dsh-sidebar 未出现在 dsh.profile.bundles 中——挂载未注册。'
   Warn "若上面的 pnpm 输出提示 ignored build scripts，请确认 $WS_YML 的 allowBuilds 后重跑本脚本（0.20.0 起本插件自身不再有构建脚本依赖）。"
   exit 1
 }

@@ -8,7 +8,7 @@
  */
 
 /** The GitHub topic page listing every repo tagged `dsh-better-sidebar`. */
-export const PLUGIN_TOPIC_URL = 'https://github.com/topics/dsh-better-sidebar'
+export const PLUGIN_TOPIC_URL = 'https://github.com/topics/vimors-dsh-sidebar'
 
 /** One curated plugin entry (name / url / description / install script). */
 export interface PluginEntry {

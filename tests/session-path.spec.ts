@@ -87,7 +87,12 @@ describe('resolveSessionPath', () => {
 describe('resolveSessionPath (dsh-remote mirror)', () => {
   let dshHome: string
   let mirrorRoot: string
+  let drvfsMirrorRoot: string
   const REMOTE_PATH = '/Users/yangheng/Project/claude/CBI_CT/civiapp_main'
+  // A remote workspace that itself lives on a DrvFs mount: its paths look
+  // exactly like a local `/mnt/<drive>` path, which is what made the rewrite
+  // order matter.
+  const DRVFS_REMOTE_PATH = '/mnt/d/AIWorkspace/remote-app'
 
   // The fs-backed cases below locate the mirror meta through win32 path
   // spelling (`win32.join` inside remotePathOf), which only names a real file
@@ -106,6 +111,12 @@ describe('resolveSessionPath (dsh-remote mirror)', () => {
     writeFileSync(
       join(mirrorRoot, '.dsh-remote-meta.json'),
       JSON.stringify({ host: '192.168.8.6', port: 22, username: 'yangheng', remotePath: REMOTE_PATH }),
+    )
+    drvfsMirrorRoot = join(dshHome, '.dsh', 'remote-workspaces', 'drvfs-host', 'remote-app')
+    mkdirSync(drvfsMirrorRoot, { recursive: true })
+    writeFileSync(
+      join(drvfsMirrorRoot, '.dsh-remote-meta.json'),
+      JSON.stringify({ host: '10.0.0.5', port: 22, username: 'dev', remotePath: DRVFS_REMOTE_PATH }),
     )
   })
 
@@ -126,6 +137,18 @@ describe('resolveSessionPath (dsh-remote mirror)', () => {
     const nested = join(mirrorRoot, 'packages', 'api')
     expect(resolveSessionPath(nested, `${REMOTE_PATH}/src/a.ts`, 'win32'))
       .toBe(join(mirrorRoot, 'src', 'a.ts'))
+  })
+
+  fsBackedIt('keeps a DrvFs-shaped remote path inside the mirror', () => {
+    // The remote workspace lives on a DrvFs mount, so its paths are
+    // indistinguishable from a local `/mnt/<drive>` path. The DrvFs rewrite
+    // used to run before the session kind was known: opening
+    // `/mnt/d/AIWorkspace/remote-app/src/a.ts` produced
+    // `D:\AIWorkspace\remote-app\src\a.ts` — a local path that does not exist
+    // — instead of the mirror file that actually holds the content.
+    expect(resolveSessionPath(drvfsMirrorRoot, `${DRVFS_REMOTE_PATH}/src/a.ts`, 'win32'))
+      .toBe(join(drvfsMirrorRoot, 'src', 'a.ts'))
+    expect(resolveSessionPath(drvfsMirrorRoot, DRVFS_REMOTE_PATH, 'win32')).toBe(drvfsMirrorRoot)
   })
 
   it('leaves a remote path OUTSIDE the mirrored workspace unprojected', () => {

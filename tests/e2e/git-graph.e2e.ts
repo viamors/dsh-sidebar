@@ -36,7 +36,7 @@ test('read-only Git Graph renders merge history and filters without checkout', a
     const response = await api.post(sidebarApi('git.graph'), { data: { sessionId: session.value.sessionId, cwd: root } })
     expect(response.ok()).toBe(true)
     await gotoPage(page)
-    await expect(page.locator('[data-dsh-better-sidebar]')).toBeAttached({ timeout: 90_000 })
+    await expect(page.locator('[data-vimors-dsh-sidebar]')).toBeAttached({ timeout: 90_000 })
     await dismissOnboarding(page)
     await sendFirstMessage(page)
     await page.locator('[data-sidebar-right-expand]').first().click()

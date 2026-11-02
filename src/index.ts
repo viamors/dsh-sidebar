@@ -30,7 +30,7 @@ import {
 import { createProbeGate, listDirectory, messageOf, parentOf, requireAbsolute, rootLabel, type SidebarFsEntry } from './fs-tree.ts'
 import { resolveSessionPath } from './session-path.ts'
 import { bridgeToWindowsHostPath, isWslUncPath, normalizeWslUncForWindows } from './wsl-path.ts'
-import { getDefaultWslDistro } from './wsl-env.ts'
+import { detectWslDistroOnce } from './wsl-env.ts'
 import { createWorkspaceFile, mkdirWorkspaceEntry, renameWorkspaceEntry, removeWorkspaceEntry, writeWorkspaceText, writeWorkspaceUpload } from './fs-operations.ts'
 import { ensureWorkspacePath } from './path-security.ts'
 import { searchFiles } from './fs-search.ts'
@@ -97,7 +97,7 @@ export type {
 // the RFC 5987 header shape is its own contract, testable without a mount.
 export { contentDispositionOf } from './archive-route.ts'
 /** Plugin identity for cordis.yml rows. */
-export const name = 'dsh-better-sidebar'
+export const name = '@vimors/dsh-sidebar'
 
 /** Row bound of one `fs.trees` batch request (a mount/refresh sends what it
  *  shows, split into cap-sized batches by the client — see `fs-batch.ts`). */
@@ -1282,7 +1282,7 @@ function buildApi(
 }
 
 /** The npm package name of this plugin, exactly as its Loader row declares it. */
-const SIDEBAR_PACKAGE_NAME = 'dsh-better-sidebar'
+const SIDEBAR_PACKAGE_NAME = '@vimors/dsh-sidebar'
 
 /**
  * Profile entry id of the sibling `dsh-web-ui` right panel this sidebar yields
@@ -1435,8 +1435,10 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
   // a compiled default, so without this kick-off a Debian or Ubuntu-22.04
   // session would be bridged onto `\\wsl.localhost\Ubuntu\...` and fail with
   // ENOENT. Detection is cached and fails soft, so a machine without WSL just
-  // keeps the default.
-  if (process.platform === 'win32') void getDefaultWslDistro().catch(() => undefined)
+  // keeps the default — and `detectWslDistroOnce` remembers that negative
+  // answer for the process, so a re-activation on such a host does not pay the
+  // failed `wsl.exe` spawn again.
+  if (process.platform === 'win32') void detectWslDistroOnce().catch(() => undefined)
   // Connection owns both deployment trust and authentication; never infer or
   // bypass its policy from invocation flags or a copied trust list.
   const fence = (req: SidebarHttpRequest): boolean => ctx.connection.requestRejection(req) === undefined

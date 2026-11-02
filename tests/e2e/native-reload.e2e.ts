@@ -77,7 +77,7 @@ test('the native tab types survive an in-page client entry replacement', async (
 
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
   await expect(page.locator('#root > *')).not.toHaveCount(0, { timeout: 90_000 })
-  const sidebar = page.locator('[data-dsh-better-sidebar]')
+  const sidebar = page.locator('[data-vimors-dsh-sidebar]')
   await expect(sidebar).toBeAttached({ timeout: 90_000 })
 
   await dismissOnboarding(page)
@@ -97,16 +97,16 @@ test('the native tab types survive an in-page client entry replacement', async (
   // Tag the CURRENT host element so the replacement is observable: a disposal
   // removes it (`host.remove()`), and the new activation appends a fresh one.
   await page.evaluate(() => {
-    document.querySelector('[data-dsh-better-sidebar]')?.setAttribute('data-e2e-generation', 'before-reload')
+    document.querySelector('[data-vimors-dsh-sidebar]')?.setAttribute('data-e2e-generation', 'before-reload')
   })
   const now = new Date()
   utimesSync(CLIENT_JS!, now, new Date(now.getTime() + 2_000))
   await expect(
-    page.locator('[data-dsh-better-sidebar][data-e2e-generation="before-reload"]'),
+    page.locator('[data-vimors-dsh-sidebar][data-e2e-generation="before-reload"]'),
     'the host must replace the plugin entry in page (new activation)',
   ).toHaveCount(0, { timeout: 60_000 })
   // Let the fresh activation finish its registrations.
-  await expect(page.locator('[data-dsh-better-sidebar]')).toBeAttached({ timeout: 60_000 })
+  await expect(page.locator('[data-vimors-dsh-sidebar]')).toBeAttached({ timeout: 60_000 })
   await page.waitForTimeout(2_000)
 
   // ── Assertions: no registration failure, takeover usable ──────────────

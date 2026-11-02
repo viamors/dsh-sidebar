@@ -197,4 +197,13 @@ describe('listDirectory (capped rows + cache)', () => {
     const dir = tempDir()
     await expect(listDirectory(join(dir, 'nope'), 10)).rejects.toMatchObject({ code: 'fs-error' })
   })
+
+  it('surfaces a failed WSL share as fs-error, never as a raw system error', async () => {
+    // The Linux-side fallback may answer `undefined` (dead child, timeout, a
+    // distro that does not exist); the caller must still get the ordinary
+    // sidebar error instead of a leaked ECONNRESET or a hang. A distro name no
+    // host has keeps this portable and side-effect free.
+    await expect(listDirectory('\\\\wsl.localhost\\dsh-audit-no-such-distro\\tmp', 10))
+      .rejects.toMatchObject({ code: 'fs-error' })
+  })
 })

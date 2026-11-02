@@ -32,7 +32,7 @@ import { t, type CopyKey } from './locales.ts'
 import css from './context-diagnostics.module.css'
 
 /** The entry id both slot registrations use. */
-export const HEADER_ENTRY_ID = 'dsh-better-sidebar:context-diagnostics'
+export const HEADER_ENTRY_ID = '@vimors/dsh-sidebar:context-diagnostics'
 
 /** The three entry points, as the e2e lane tells them apart. */
 export type DiagnosticsEntryKind = 'session' | 'agent' | 'job'
@@ -212,7 +212,7 @@ export function registerContextDiagnosticsUI(ctx: Context, controller: ContextDi
       // After the host's own utilities and after the bottom-workbench toggle
       // (order 10), so the two plugin controls sit together at the row's edge.
       order: 20,
-      registrant: 'dsh-better-sidebar',
+      registrant: '@vimors/dsh-sidebar',
       inject: (sessionId: string) => ({
         controller,
         sessionId,
@@ -223,7 +223,7 @@ export function registerContextDiagnosticsUI(ctx: Context, controller: ContextDi
       name: 'shell.overlay',
       id: HEADER_ENTRY_ID,
       order: 20,
-      registrant: 'dsh-better-sidebar',
+      registrant: '@vimors/dsh-sidebar',
       inject: () => ({ controller }),
     }, ContextDiagnosticsAlert)))
   } catch (error) {
