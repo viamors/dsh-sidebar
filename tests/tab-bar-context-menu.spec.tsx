@@ -227,8 +227,9 @@ describe('TabBar right-click context menu', () => {
     const { tabEls, onRevealInFileManager, onClose, unmount } = mountBar(fileTabs())
     try {
       act(() => { rightClick(tabEls[0]!) })
-      // The file tab's row is live; the pane's other tab has no file.
-      expect(menuDisabled()).toEqual([false, false, true, false, false, false])
+      // The file tab's row is live; the pane's other tab has no file. A file
+      // tab also gains the two copy-path rows after the reveal row (6 base + 2).
+      expect(menuDisabled()).toEqual([false, false, true, false, false, false, false, false])
       act(() => { menuItems()[5]!.click() })
       expect(onRevealInFileManager).toHaveBeenCalledTimes(1)
       expect(onRevealInFileManager).toHaveBeenCalledWith('/repo/src/a.ts')
@@ -408,7 +409,7 @@ describe('Sidebar tab context menu reveal', () => {
       // The copy is pinned by the TabBar block above (against zh); here the
       // shape and the row's live state are what matter (the shell runs on the
       // default locale).
-      expect(menuItems()).toHaveLength(MENU_LABELS.length)
+      expect(menuItems()).toHaveLength(MENU_LABELS.length + 2)
       expect(menuDisabled()[5]).toBe(false)
       await act(async () => { menuItems()[5]!.click() })
       expect(reveal).toHaveBeenCalledTimes(1)

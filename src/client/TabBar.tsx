@@ -343,12 +343,15 @@ export function TabBar(props: {
             { id: 'closeLeft', label: t('closeLeftTabs'), ...(tabMenuIndex <= 0 ? { disabled: true } : {}) },
             { id: 'closeRight', label: t('closeRightTabs'), ...(tabMenuIndex >= tabs.length - 1 ? { disabled: true } : {}) },
             { id: 'closeAll', label: t('closeAllTabs') },
+            // The reveal row stays in the base list (grays out for a path-less
+            // tab, exactly like upstream) so the feature is discoverable even
+            // when there is nothing to reveal yet.
+            { id: 'revealInFileManager', label: t('revealTabInFileManager'), ...(canReveal ? {} : { disabled: true }) },
             ...(tabMenuPath !== undefined && tabMenuPath !== ''
               ? [
                   { type: 'separator', id: 'sep-path' } as const,
                   { id: 'copyRelative', label: t('copyRelative'), icon: <IconCopyOutlineRegular size={14} /> },
                   { id: 'copyAbsolute', label: t('copyAbsolute'), icon: <IconCopyOutlineRegular size={14} /> },
-                  { id: 'revealInFileManager', label: t('revealTabInFileManager'), icon: <IconFolderOpenRegular size={14} />, ...(canReveal ? {} : { disabled: true }) },
                 ]
               : []),
           ]}

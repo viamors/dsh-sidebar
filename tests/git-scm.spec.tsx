@@ -12,6 +12,20 @@ setupReactAct()
 afterEach(() => { vi.restoreAllMocks() })
 const CWD = 'C:/repo'
 const store = createSidebarStore()
+/** The unstage artwork the SCM rows draw (the plugin's own inline horizontal half). */
+const MINUS_GLYPH = 'M2 8H14'
+/** The host's own Plus, a document-sprite reference since DSH 0.2.2 (it used
+ *  to be inline `<path>` artwork, so only the sprite id identifies it now). */
+const PLUS_ICON = '#dsw-icon-plus-outline-regular'
+/** One action button's artwork as the DOM carries it: the host's icons are
+ *  sprite references (`<use href="#dsw-icon-…">`), the plugin's minus is still
+ *  inline artwork, so both shapes have to be readable. */
+const glyphOf = (button: HTMLButtonElement): string => {
+  const svg = button.querySelector('svg')!
+  const sprite = svg.getAttribute('data-icon')
+  if (sprite !== null) return `#${sprite}`
+  return [...svg.querySelectorAll('path')].map(path => path.getAttribute('d')).join(' ')
+}
 const tracked = (): GitStatusResult => ({
   isRepo: true, branch: 'main', root: CWD, upstream: 'origin/main', ahead: 1, behind: 0,
   entries: [{ path: 'src/partial.ts', xy: 'MD' }, { path: 'new.ts', xy: '??' }],
@@ -52,7 +66,7 @@ async function mount(readStatus: (scope: SessionScope) => GitStatusResult) {
   return { ...view, switchTo: async (session: string) => { view.rerender(render(session)); await flush(); await flush() } }
 }
 
-it('orders distinct conflict/index/worktree groups, folds independently, and keeps the toolbar', async () => {
+it('orders distinct conflict/index/worktree groups, folds independently, and keeps the footer', async () => {
   const snapshot = { ...tracked(), operation: 'merge' as const, entries: [...tracked().entries, { path: 'conflict.ts', xy: 'UU' }] }
   const view = await mount(() => snapshot)
   const stage = vi.spyOn(api, 'gitStage').mockResolvedValue({ ok: true })
@@ -83,19 +97,18 @@ it('orders distinct conflict/index/worktree groups, folds independently, and kee
     expect(disclosure('unstaged').getAttribute('aria-expanded')).toBe('false')
     await click(disclosure('unstaged'))
     expect(disclosure('unstaged').getAttribute('aria-expanded')).toBe('true')
-    const toolbar = container.querySelector('[data-git-toolbar]')!
-    expect(toolbar.textContent).toContain('main*+!')
-    expect(container.querySelector('[data-git-scroll]')!.contains(toolbar)).toBe(false)
+    const footer = container.querySelector('[data-git-footer]')!
+    expect(footer.textContent).toContain('main*+!')
+    expect(container.querySelector('[data-git-scroll]')!.contains(footer)).toBe(false)
     const changes = container.querySelector<HTMLButtonElement>('[data-scm-section="changes"] button[aria-expanded]')!
     const graph = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
-    await click(graph) // the Graph starts folded; this flow needs its rows mounted
     await write(input(container), 'kept draft')
     await click(changes)
     expect(input(container)).toBeNull()
     expect(container.querySelector('[data-graph-commit]')).not.toBeNull()
     await click(graph)
     expect(container.querySelector('[data-graph-commit]')).toBeNull()
-    expect(toolbar.querySelector('button[aria-haspopup="menu"]')).not.toBeNull()
+    expect(footer.querySelector('button[aria-haspopup="menu"]')).not.toBeNull()
     await click(changes)
     expect(input(container).value).toBe('kept draft')
     await click(container.querySelector<HTMLButtonElement>(`[data-group="unstaged"] button[aria-label="${t('stageAll')}"]`)!)
@@ -121,30 +134,21 @@ it('keeps directory/all actions inside their group, including Merge directory fo
     expect(rows).toHaveLength(7)
     for (const directory of view.container.querySelectorAll('[data-dir]')) expect(directory.closest('[data-row]')!.querySelector('[data-count]')).toBeNull()
     for (const row of rows) {
-      // Every row's LAST trailing action is the stage toggle. A FILE row also
-      // carries the open-in-editor action just before it (the row-level twin of
-      // the context menu's first item); a directory row carries only its
-      // subtree's stage toggle.
-      const actions = [...row.querySelectorAll<HTMLButtonElement>(':scope > button[aria-label]')]
-      const action = actions.at(-1)!
+      const action = row.querySelector<HTMLButtonElement>(':scope > button[aria-label]')!
       expect(row.lastElementChild).toBe(action)
-      if (row.querySelector('[data-path]') !== null) {
-        expect(actions.map(button => button.getAttribute('aria-label'))).toEqual([t('openEditor'), action.getAttribute('aria-label')])
-      } else expect(actions).toHaveLength(1)
       expect(action.querySelector('svg')!.getAttribute('width')).toBe('12')
       expect(action.querySelector('svg')!.getAttribute('height')).toBe('12')
       // Staging and unstaging must not share artwork: a staged row's action
-      // unstages (the minus), every other row's stages (the host's Plus).
-      const glyphs = [...action.querySelectorAll('svg path')].map(path => path.getAttribute('d'))
+      // unstages (the plugin's minus), every other row's stages (the host's
+      // Plus sprite).
       const stagedRow = row.closest('[data-group]')!.getAttribute('data-group') === 'staged'
-      expect(glyphs).toEqual(stagedRow ? ['M2 8H14'] : ['M8 2V14', 'M2 8H14'])
+      expect(glyphOf(action)).toBe(stagedRow ? MINUS_GLYPH : PLUS_ICON)
     }
     for (const name of ['merge', 'staged', 'unstaged']) {
       const headerAction = group(name).firstElementChild!.querySelector<HTMLButtonElement>(`button[aria-label="${t(name === 'staged' ? 'unstageAll' : 'stageAll')}"]`)!
       expect(headerAction.querySelector('svg')!.getAttribute('width')).toBe('12')
       expect(headerAction.querySelector('svg')!.getAttribute('height')).toBe('12')
-      expect([...headerAction.querySelectorAll('svg path')].map(path => path.getAttribute('d')))
-        .toEqual(name === 'staged' ? ['M2 8H14'] : ['M8 2V14', 'M2 8H14'])
+      expect(glyphOf(headerAction)).toBe(name === 'staged' ? MINUS_GLYPH : PLUS_ICON)
     }
     await click(dir('merge'))
     expect(dir('merge').getAttribute('aria-expanded')).toBe('false')
@@ -253,7 +257,7 @@ it('shows genuine upstream counts, syncs Pull then Push, and never pushes after 
   const pull = vi.spyOn(api, 'gitPull').mockImplementation(async () => { order.push('pull'); return { ok: true } })
   const push = vi.spyOn(api, 'gitPush').mockImplementation(async () => { order.push('push'); return { ok: true } })
   const view = await mount(() => snapshot)
-  const sync = (): HTMLButtonElement => view.container.querySelector<HTMLButtonElement>('[data-git-toolbar] [data-git-sync]')!
+  const sync = (): HTMLButtonElement => view.container.querySelector<HTMLButtonElement>(`[data-git-footer] button[aria-label^="${t('gitSync')}"]`)!
   try {
     expect(sync().textContent).toContain('0↓ 1↑')
     expect(sync().title).toContain('origin/main')
@@ -273,20 +277,14 @@ it('shows genuine upstream counts, syncs Pull then Push, and never pushes after 
     expect(vi.mocked(api.gitStatus).mock.calls.length).toBeGreaterThan(statusCalls)
     snapshot = { ...tracked(), upstream: undefined, ahead: undefined, behind: undefined }
     await act(async () => { invalidateGitStatus('scm-A') }); await flush()
-    // The chip's accessible name is its visible text (no `aria-label` that
-    // would differ from it, WCAG 2.5.3); the reason a click is unavailable
-    // rides in `title` and in that visible text.
-    expect(sync().title).toBe('No upstream')
-    expect(sync().textContent).toBe('No upstream')
-    expect(sync().disabled).toBe(true)
+    expect(view.container.querySelector<HTMLButtonElement>('[data-git-footer] button[aria-label="No upstream"]')!.disabled).toBe(true)
     snapshot = { ...snapshot, branch: '', detached: true }
     await act(async () => { invalidateGitStatus('scm-A') }); await flush()
-    expect(sync().title).toBe('Detached HEAD')
-    expect(sync().disabled).toBe(true)
+    expect(view.container.querySelector<HTMLButtonElement>('[data-git-footer] button[aria-label="Detached HEAD"]')!.disabled).toBe(true)
   } finally { view.unmount() }
 })
 
-it('checks out a plain branch and refreshes placeholder, resources, graph and toolbar together', async () => {
+it('checks out a plain branch and refreshes placeholder, resources, graph and footer together', async () => {
   let snapshot = tracked()
   const checkout = vi.spyOn(api, 'gitCheckout').mockImplementation(async (_scope, branch) => {
     snapshot = { ...tracked(), branch, entries: [], ahead: 0, behind: 2, upstream: 'origin/feature' }
@@ -294,134 +292,16 @@ it('checks out a plain branch and refreshes placeholder, resources, graph and to
   })
   const view = await mount(() => snapshot)
   try {
-    // The Graph starts folded; unfold it so its own route participates in
-    // the refresh this test asserts.
-    const graphDisclosure = view.container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
-    await click(graphDisclosure)
     expect(input(view.container).placeholder).toBe('Message (Ctrl+Enter to commit on "main")')
     const graphCalls = vi.mocked(api.gitGraph).mock.calls.length
-    await click(view.container.querySelector<HTMLButtonElement>('[data-git-toolbar] [data-git-branch]')!)
+    await click(view.container.querySelector<HTMLButtonElement>('[data-git-footer] button[aria-haspopup="menu"]')!)
     const feature = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === 'feature')!
     await click(feature)
     await flush()
     expect(checkout).toHaveBeenCalledExactlyOnceWith({ sessionId: 'scm-A', cwd: CWD }, 'feature', CWD)
     expect(input(view.container).placeholder).toBe('Message (Ctrl+Enter to commit on "feature")')
     expect(view.container.querySelectorAll('[data-group]')).toHaveLength(0)
-    expect(view.container.querySelector('[data-git-toolbar]')!.textContent).toContain('2↓ 0↑')
+    expect(view.container.querySelector('[data-git-footer]')!.textContent).toContain('2↓ 0↑')
     expect(vi.mocked(api.gitGraph).mock.calls.length).toBeGreaterThan(graphCalls)
-  } finally { view.unmount() }
-})
-
-it('narrows the change list by a path substring, recounts the groups, and clears on Escape', async () => {
-  const snapshot = {
-    ...tracked(),
-    entries: [
-      { path: 'src/client/changes/GitLens.tsx', xy: ' M' },
-      { path: 'src/wsl-path.ts', xy: ' M' },
-      { path: 'docs/guide.md', xy: '??' },
-    ],
-  }
-  const view = await mount(() => snapshot)
-  const filterBox = (): HTMLInputElement => view.container.querySelector<HTMLInputElement>('[data-git-filter] input')!
-  const typeFilter = async (value: string): Promise<void> => {
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(filterBox(), value)
-      filterBox().dispatchEvent(new Event('input', { bubbles: true }))
-    })
-  }
-  const paths = (): string[] => [...view.container.querySelectorAll('[data-path]')]
-    .map(element => element.getAttribute('data-path')!)
-    .sort()
-  const ALL = ['docs/guide.md', 'src/client/changes/GitLens.tsx', 'src/wsl-path.ts'].sort()
-  try {
-    expect(filterBox().placeholder).toBe(t('gitFilterFiles'))
-    expect(paths()).toEqual(ALL)
-    // Case-insensitive, and a surviving file keeps its directory chain open —
-    // a match folded inside a collapsed folder would read as "no match".
-    await typeFilter('WSL')
-    expect(paths()).toEqual(['src/wsl-path.ts'])
-    // The group's count pill follows the rows the filter actually shows.
-    expect(view.container.querySelector('[data-group="unstaged"]')!.firstElementChild!.lastElementChild!.getAttribute('data-count')).toBe('1')
-    // A path substring works too (not just a file name).
-    await typeFilter('changes/git')
-    expect(paths()).toEqual(['src/client/changes/GitLens.tsx'])
-    await typeFilter('nothing-matches')
-    expect(paths()).toEqual([])
-    expect(view.container.textContent).toContain(t('gitFilterEmpty'))
-    await act(async () => { filterBox().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
-    expect(filterBox().value).toBe('')
-    expect(paths()).toEqual(ALL)
-  } finally { view.unmount() }
-})
-
-it('feeds the header totals from the filtered rows and makes the pinned disclosures inert', async () => {
-  const view = await mount(() => ({
-    ...tracked(),
-    entries: [
-      { path: 'src/keep.ts', xy: ' M', unstaged: { additions: 12, deletions: 3 } },
-      { path: 'src/drop.ts', xy: ' M', unstaged: { additions: 500, deletions: 400 } },
-    ],
-  }))
-  const filterBox = (): HTMLInputElement => view.container.querySelector<HTMLInputElement>('[data-git-filter] input')!
-  const typeFilter = async (value: string): Promise<void> => {
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(filterBox(), value)
-      filterBox().dispatchEvent(new Event('input', { bubbles: true }))
-    })
-  }
-  const pair = (selector: string): string => {
-    const element = view.container.querySelector<HTMLElement>(selector)!
-    return `${element.dataset.added}/${element.dataset.deleted}`
-  }
-  const dir = (): HTMLButtonElement => view.container.querySelector<HTMLButtonElement>('button[data-dir="src"]')!
-  const band = (): HTMLButtonElement => view.container.querySelector<HTMLButtonElement>('[data-group="unstaged"] > div:first-child > button[aria-expanded]')!
-  try {
-    // Unfiltered, the header is the whole working tree and matches its band.
-    expect(view.container.querySelector('[data-tree-totals]')!.getAttribute('data-tree-totals')).toBe('2')
-    expect(pair('[data-tree-totals] [data-lines="tree-total"]')).toBe('512/403')
-    expect(pair('[data-group="unstaged"] [data-lines="group"]')).toBe('512/403')
-    // A filter prunes the rows, and the header follows them: it must not keep
-    // claiming the +500 the filter just hid.
-    await typeFilter('keep')
-    expect(view.container.querySelector('[data-tree-totals]')!.getAttribute('data-tree-totals')).toBe('1')
-    expect(pair('[data-tree-totals] [data-lines="tree-total"]')).toBe('12/3')
-    expect(pair('[data-group="unstaged"] [data-lines="group"]')).toBe('12/3')
-    // A needle pins every band and directory open, so their disclosures have
-    // nothing left to toggle: inert, not a live-looking button that does nothing.
-    expect(dir().getAttribute('aria-expanded')).toBe('true')
-    expect(dir().disabled).toBe(true)
-    expect(band().disabled).toBe(true)
-    await click(dir())
-    expect(dir().getAttribute('aria-expanded')).toBe('true')
-    // With the filter gone they are live again and fold as before.
-    await act(async () => { filterBox().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
-    expect(dir().disabled).toBe(false)
-    expect(band().disabled).toBe(false)
-    await click(dir())
-    expect(dir().getAttribute('aria-expanded')).toBe('false')
-  } finally { view.unmount() }
-})
-
-it('offers every branch as a flat More Actions row — a second route to checkout', async () => {
-  const view = await mount(() => tracked())
-  const checkout = vi.spyOn(api, 'gitCheckout').mockResolvedValue({ ok: true })
-  try {
-    const trigger = view.container.querySelector<HTMLButtonElement>('[data-git-toolbar] [data-git-more]')!
-    // A menu trigger has to announce the menu and its own state (the kit's
-    // IconButton only ever publishes `aria-pressed`).
-    expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
-    expect(trigger.getAttribute('aria-expanded')).toBe('false')
-    await click(trigger)
-    expect(trigger.getAttribute('aria-expanded')).toBe('true')
-
-    const rows = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-    // Flat rows under their own heading, never a nested submenu card: the host
-    // opens those to the RIGHT, off-screen from a right-docked panel.
-    expect(rows().map(row => row.textContent)).toEqual(expect.arrayContaining(['main', 'feature']))
-    await click(rows().find(row => row.textContent === 'feature')!)
-    await flush()
-    expect(checkout).toHaveBeenCalledExactlyOnceWith({ sessionId: 'scm-A', cwd: CWD }, 'feature', CWD)
-    // Picking a row closes the menu.
-    expect(rows()).toHaveLength(0)
   } finally { view.unmount() }
 })

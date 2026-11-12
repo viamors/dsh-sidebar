@@ -16,7 +16,7 @@ describe('dsh-better-sidebar plugin export shape', () => {
     const loader = Object.create(Loader.prototype) as Loader
     const unwrapped = loader.unwrapExports(sidebar) as Record<string, unknown>
     expect(unwrapped).toBe(sidebar)
-    expect(unwrapped.name).toBe('dsh-better-sidebar')
+    expect(unwrapped.name).toBe('@vimors/dsh-sidebar')
     expect(unwrapped.inject).toEqual(['webServer', 'sessions', 'connection', 'tools'])
     expect(unwrapped.Config).toBeDefined()
     expect(typeof unwrapped.apply).toBe('function')

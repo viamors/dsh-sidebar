@@ -30,6 +30,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { test, expect, type APIRequestContext } from '@playwright/test'
 import { PAGE_URL, composerEditable, createHostApi, dismissOnboarding, gotoPage, hostRpc, sendFirstMessage, sidebarApi } from './host'
 
@@ -49,6 +50,10 @@ const SEEDED_MD_FILE = 'diagram.md'
  *  inline tags in table cells), opened through the Files window's tree to
  *  prove raw-HTML runs render as sanitized DOM and the TOC outline works. */
 const SEEDED_README_FILE = 'readme-style.md'
+
+/** A 1×1 PNG for the markdown local-image probe. */
+const SEEDED_PNG = 'pic.png'
+const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 /**
  * The plugin's crash markers. The client mounts inside an error boundary that
@@ -105,6 +110,10 @@ async function seedSession(): Promise<void> {
     'tail text',
     '',
   ].join('\n'))
+  // The local-image probe: the markdown preview's media route must serve the
+  // relative path, and a data:image destination must render as an <img>.
+  writeFileSync(join(WORKSPACE_PATH, SEEDED_PNG), Buffer.from(ONE_PIXEL_PNG, 'base64'))
+  const seededPngUrl = pathToFileURL(join(WORKSPACE_PATH, SEEDED_PNG)).href
   // The README-style probe file: raw-HTML runs (badge wall div with an
   // embedded script, a <details> nesting a fence + heading) plus inline tags
   // inside a table cell. The script must be sanitized away in the preview.
@@ -118,6 +127,12 @@ async function seedSession(): Promise<void> {
     '',
     '<a id="readme-anchor"></a>',
     '## Setup',
+    '',
+    '![local image](pic.png)',
+    '',
+    `![data image](data:image/png;base64,${ONE_PIXEL_PNG})`,
+    '',
+    `![file url image](${seededPngUrl})`,
     '',
     '[docs link][def]',
     '',
@@ -166,6 +181,30 @@ test('plugin mounts into the DSH shell and survives a built-in tab sweep', async
   page.on('pageerror', (error) => pageErrors.push(String(error)))
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors.push(message.text())
+  })
+
+  // A fake Window Controls Overlay so the test can play the desktop shell's
+  // native window-control band. It starts at 0 (plain-browser behaviour, so
+  // every other assertion in this lane stays exactly as before); the mermaid
+  // section below raises it and measures the REAL layout.
+  await page.addInitScript(() => {
+    const listeners = new Set<() => void>()
+    const band = { height: 0, visible: true }
+    Object.defineProperty(navigator, 'windowControlsOverlay', {
+      configurable: true,
+      value: {
+        get visible() { return band.visible },
+        getTitlebarAreaRect: () => ({ x: 0, y: 0, width: window.innerWidth, height: band.height }),
+        addEventListener: (type: string, listener: () => void) => {
+          if (type === 'geometrychange') listeners.add(listener)
+        },
+        removeEventListener: (_type: string, listener: () => void) => { listeners.delete(listener) },
+      },
+    })
+    ;(window as unknown as { __setTitlebarBand(height: number): void }).__setTitlebarBand = (height) => {
+      band.height = height
+      for (const listener of listeners) listener()
+    }
   })
 
   // Load the shell. The app renders into #root; the plugin appends its own
@@ -526,8 +565,12 @@ test('plugin mounts into the DSH shell and survives a built-in tab sweep', async
   const mdRow = pane.locator(`[role="button"][title$="${SEEDED_MD_FILE}"]:visible`)
   await expect(mdRow, `the seeded "${SEEDED_MD_FILE}" file must appear in the plugin's explorer`).toHaveCount(1, { timeout: 30_000 })
   await mdRow.click({ position: { x: 8, y: 8 } })
+  // The editor tab keeps its CodeMirror host mounted and hides it in preview
+  // mode; whether CodeMirror has virtualized the document's last line by now is
+  // a matter of when its hidden view was measured, so the matching element is
+  // not stable. Only the VISIBLE copy is the preview this assertion is about.
   await expect(
-    pane.getByText('tail text'),
+    pane.getByText('tail text').filter({ visible: true }),
     'the markdown preview must render the seeded document',
   ).toHaveCount(1, { timeout: 30_000 })
   await mermaidChunk
@@ -551,6 +594,67 @@ test('plugin mounts into the DSH shell and survives a built-in tab sweep', async
   const modal = page.locator('[data-mermaid-modal]')
   await pane.locator('[data-mermaid-diagram] svg').first().click()
   await expect(modal, 'clicking the diagram must open the zoom modal').toHaveCount(1, { timeout: 10_000 })
+  // Issue #683: the modal must zoom the CONTENT while the painted card stays
+  // put. Measured in the real browser because this is a LAYOUT defect — jsdom
+  // reports every rect as 0 and cannot tell the two apart. The pre-fix code
+  // painted the card on the transformed <svg>, so three "+" steps grew the
+  // white sheet 1.728× together with the diagram and the content:viewport
+  // ratio never changed ("跟没有缩放没区别"); the same three steps must now
+  // leave the viewport's box byte-identical.
+  const zoomGeometry = await page.evaluate(() => {
+    const viewport = document.querySelector<HTMLElement>('[data-mermaid-viewport]')
+    const stage = viewport?.parentElement ?? null
+    const svg = viewport?.querySelector('svg') ?? null
+    const box = (element: Element | null): { width: number; height: number } => {
+      const rect = element?.getBoundingClientRect()
+      return { width: Math.round(rect?.width ?? 0), height: Math.round(rect?.height ?? 0) }
+    }
+    const scaleOf = (element: Element | null): number => {
+      const matrix = /matrix\(([-\d.]+)/.exec(element === null ? '' : getComputedStyle(element).transform)
+      return matrix === null ? 1 : Number(matrix[1])
+    }
+    const before = {
+      stage: box(stage), viewport: box(viewport), svg: box(svg), scale: scaleOf(svg),
+      stageBackground: stage === null ? '' : getComputedStyle(stage).backgroundColor,
+      svgBackground: svg === null ? '' : getComputedStyle(svg).backgroundColor,
+      svgPadding: svg === null ? '' : getComputedStyle(svg).padding,
+    }
+    const zoomIn = [...document.querySelectorAll<HTMLButtonElement>('[data-mermaid-modal] button')]
+      .find(button => button.textContent === '+')
+    for (let step = 0; step < 3; step += 1) zoomIn?.click()
+    const after = { stage: box(stage), viewport: box(viewport), svg: box(svg), scale: scaleOf(svg) }
+    return { before, after }
+  })
+  expect(
+    zoomGeometry.before.scale,
+    'the modal must open framed at or below 1:1 instead of clipping the diagram at 100%',
+  ).toBeLessThanOrEqual(1)
+  expect(
+    zoomGeometry.before.svg.height,
+    'the framed diagram must fit inside the viewport',
+  ).toBeLessThanOrEqual(zoomGeometry.before.viewport.height + 1)
+  expect(
+    zoomGeometry.after.scale,
+    'the + button must scale the content up',
+  ).toBeGreaterThan(zoomGeometry.before.scale)
+  expect(zoomGeometry.after.svg, 'the content grows').not.toEqual(zoomGeometry.before.svg)
+  expect(
+    zoomGeometry.after.viewport,
+    'the viewport must NOT scale with the content (issue #683)',
+  ).toEqual(zoomGeometry.before.viewport)
+  expect(
+    zoomGeometry.after.stage,
+    'the painted card must NOT scale with the content either',
+  ).toEqual(zoomGeometry.before.stage)
+  expect(
+    zoomGeometry.before.stageBackground,
+    'the card surface belongs to the fixed stage',
+  ).not.toBe('rgba(0, 0, 0, 0)')
+  expect(
+    zoomGeometry.before.svgBackground,
+    'the transformed svg must carry no surface of its own',
+  ).toBe('rgba(0, 0, 0, 0)')
+  expect(zoomGeometry.before.svgPadding, 'nor the padding ring').toBe('0px')
   // While it is up, the modal is the plugin's OTHER viewport-sized BODY CHILD:
   // without the app-region reset the shell's blanket `body > :not(#root)`
   // no-drag makes it cancel every window-drag strip (and the macOS
@@ -573,6 +677,25 @@ test('plugin mounts into the DSH shell and survives a built-in tab sweep', async
   })
   expect(modalRegions.modal, 'the zoom modal must opt out of app-region computation').toBe('none')
   expect(modalRegions.button, 'its buttons must stay no-drag').toBe('no-drag')
+  // Issue #805: the shell draws its native window controls OVER the page's
+  // top-right and those pointer events never reach the document, so the
+  // toolbar must sit below that band. At the reporter's 42px overlay a bare
+  // 16px inset left only the bottom 10px of each 36px button clickable while
+  // `elementFromPoint` still answered the button — the control read as dead.
+  // Play the band and measure the real layout.
+  const toolbar = page.locator('[data-mermaid-modal] [data-mermaid-toolbar]')
+  const toolbarTop = async (): Promise<number> => await toolbar.evaluate(
+    (element) => Math.round(element.getBoundingClientRect().top),
+  )
+  expect(await toolbarTop(), 'with no band the toolbar keeps its 16px inset').toBe(16)
+  await page.evaluate(() => {
+    ;(window as unknown as { __setTitlebarBand(h: number): void }).__setTitlebarBand(36)
+  })
+  await expect.poll(toolbarTop, 'a 36px band must push the toolbar clear of it').toBe(52)
+  await page.evaluate(() => {
+    ;(window as unknown as { __setTitlebarBand(h: number): void }).__setTitlebarBand(0)
+  })
+  await expect.poll(toolbarTop, 'shrinking the band must pull the toolbar back').toBe(16)
   await page.keyboard.press('Escape')
   await expect(modal, 'Esc must close the zoom modal').toHaveCount(0, { timeout: 10_000 })
   await assertNoCrash()
@@ -606,9 +729,15 @@ test('plugin mounts into the DSH shell and survives a built-in tab sweep', async
   // `data-composer-chip` is the host's own anchor for a composer chip (its
   // JSDoc names e2e as the reason it exists) — a bare `[class*="reference"]`
   // match could land on any element whose hashed class happens to contain it.
-  const chip = page.locator(`[data-composer-chip]`).filter({ hasText: `${SEEDED_MD_FILE}:` }).first()
+  //
+  // The chip's VISIBLE label is the localized `quoteChip` string ("引用 …" /
+  // "Quote …") carrying the file name and line range; the compact `path:line`
+  // form is the chip's clipboard text, not its face (#1111). Match the file
+  // name, not the separator, and require exactly one chip so a duplicated
+  // insert still fails.
+  const chip = page.locator('[data-composer-chip]').filter({ hasText: SEEDED_MD_FILE })
   await expect(chip, 'the selection must land in the composer as a reference chip')
-    .toBeVisible({ timeout: 10_000 })
+    .toHaveCount(1, { timeout: 10_000 })
   // A selection chip's `ref` is a fenced block, not a path: the host must not
   // mark it openable, or a click would hand that block to the file opener.
   await expect(chip, 'a selection chip must not advertise itself as openable')
@@ -640,11 +769,35 @@ test('plugin mounts into the DSH shell and survives a built-in tab sweep', async
     pane.locator('[data-dsh-html-segment] img[src*="img.shields.io"]'),
     'the badge-wall div must render its image as a real element',
   ).toHaveCount(1, { timeout: 30_000 })
+  // Local image: a relative markdown destination must resolve through the
+  // plugin media route and actually decode. Data image: the vocabulary now
+  // admits data:image, so it must render as an <img>, not alt text.
+  const localImages = pane.locator('img[src*="/sidebar/file"]')
+  await expect(localImages, 'the relative and file: URL markdown images must render through the media route').toHaveCount(2, { timeout: 30_000 })
+  for (let index = 0; index < 2; index += 1) {
+    const image = localImages.nth(index)
+    await image.scrollIntoViewIfNeeded()
+    await expect.poll(
+      () => image.evaluate((node) => (node as HTMLImageElement).naturalWidth),
+      { message: 'each local markdown image (relative and file: URL) must decode in the real browser' },
+    ).toBeGreaterThan(0)
+  }
+  const dataImage = pane.locator('img[src^="data:image/png;base64,"]').first()
+  await expect(dataImage, 'a markdown data:image must render as an <img>').toHaveCount(1, { timeout: 30_000 })
+  await dataImage.scrollIntoViewIfNeeded()
+  await expect.poll(
+    () => dataImage.evaluate((image) => (image as HTMLImageElement).naturalWidth),
+    { message: 'the data:image markdown image must decode' },
+  ).toBeGreaterThan(0)
   await expect(
     pane.locator('script'),
     'the embedded <script> must be sanitized away',
   ).toHaveCount(0)
-  const details = pane.locator('details')
+  // Scoped by the authored summary, not by the whole panel: the Side Chat tab
+  // keeps its own <details> controls (and their nested tool/reasoning rows)
+  // mounted in the same column, so a bare `pane.locator('details')` counts
+  // those too.
+  const details = pane.locator('details:has(summary:has-text("Steps"))')
   await expect(details, 'the details run must render as a real element').toHaveCount(1, { timeout: 30_000 })
   await expect(details.locator('summary'), 'the details summary must render').toHaveCount(1)
   // Direct child, not merely a descendant: HTML only honors a summary there,
@@ -1053,7 +1206,11 @@ test('the explorer @-reference button keeps earlier chips (no whole-draft rewrit
   const mdRow = pane.locator(`[role="button"][title$="${SEEDED_MD_FILE}"]:visible`)
   await expect(mdRow).toHaveCount(1, { timeout: 30_000 })
   await mdRow.click({ position: { x: 8, y: 8 } }) // open the file (not the @ action)
-  await expect(pane.getByText('tail text')).toHaveCount(1, { timeout: 30_000 })
+  // Same hidden-CodeMirror copy as above: the preview is the visible one.
+  await expect(
+    pane.getByText('tail text').filter({ visible: true }),
+    'the markdown preview must render the seeded document exactly once',
+  ).toHaveCount(1, { timeout: 30_000 })
   // A multi-line selection in the code viewer (CodeMirror): the editor path
   // raises the same popup with a fenced payload carrying the file and its line
   // range — the multi-line shape this module has to hand over verbatim.

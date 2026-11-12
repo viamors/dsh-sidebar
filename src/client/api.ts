@@ -7,10 +7,12 @@
  * is still hydrating at page load (a detached session would otherwise fail the
  * request). Failures surface as {@link SidebarApiError} with the wire code.
  */
+import type { SidechatImageUpload } from '../sidechat-images.ts'
 import { encodeHtmlUrl } from '../html-route.ts'
 import { hostRouteUrl } from './host-route-url.ts'
 import { resolveSidebarPath } from './paths.ts'
 import type {
+  SidechatForkPoint,
   SidechatLiveEvent,
   SidechatLogEvent,
   SidechatModelCatalog,
@@ -609,8 +611,8 @@ export const api = {
   sidechatStart: (sessionId: string, question?: string) =>
     call<{ childId: string }>('sidechat.start', { sessionId, question: question ?? '' }),
   /** Deliver one follow-up message to a Side Chat thread. */
-  sidechatPrompt: (childId: string, text: string) =>
-    call<{ accepted: true }>('sidechat.prompt', { childId, text }),
+  sidechatPrompt: (childId: string, text: string, images?: readonly SidechatImageUpload[]) =>
+    call<{ accepted: true; messageId: string }>('sidechat.prompt', { childId, text, ...(images === undefined || images.length === 0 ? {} : { images }) }),
   /** Abort a Side Chat thread's running turn (queued work is preserved). */
   sidechatCancel: (childId: string) =>
     call<{ accepted: true }>('sidechat.cancel', { childId }),
@@ -631,7 +633,17 @@ export const api = {
    *  pending bubbles, deduped by id against the durable `user/message` rows
    *  the claim later writes. */
   sidechatEvents: (childId: string, afterSeq?: number, signal?: AbortSignal) =>
-    call<{ events: SidechatLogEvent[]; live: SidechatLiveEvent[]; pending: SidechatPendingInput[] }>('sidechat.events', {
+    call<{
+      events: SidechatLogEvent[]
+      live: SidechatLiveEvent[]
+      pending: SidechatPendingInput[]
+      /** The route cut the head of the log to its event cap: `events` is a TAIL
+       *  slice, so the transcript must say history is missing above it. */
+      truncated?: boolean
+      /** The FIRST pull of a seeded thread: where it forked off the parent
+       *  conversation, and the parent's last exchange there (additive). */
+      fork?: SidechatForkPoint
+    }>('sidechat.events', {
       childId,
       ...(afterSeq !== undefined ? { afterSeq } : {}),
     }, signal),

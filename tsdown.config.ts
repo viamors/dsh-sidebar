@@ -345,7 +345,7 @@ export default [
   // (dsh.plugin.json). DSH never reads that file — the official profile
   // channel is the package-name bundle above, declared through
   // package.json's `dsh.bundle.patch`.
-  clientBundle('@vimors/dsh-sidebar', 'client-registry.js'),
+  clientBundle('dsh-external/vimors-dsh-sidebar', 'client-registry.js'),
   // Lazy chunks: shared by both channels, fetched on first use through the
   // plugin's /sidebar/bundle route (see src/client/chunk-loader.ts).
   ...CHUNKS.map(chunkBundle),

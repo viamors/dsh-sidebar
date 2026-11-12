@@ -204,7 +204,7 @@ function mount(setup: {
   const ctx = {
     fiber,
     loader: {
-      entries: () => [{ options: { id: ENTRY_ID, name: 'dsh-better-sidebar' }, fiber, disabled: false }],
+      entries: () => [{ options: { id: ENTRY_ID, name: '@vimors/dsh-sidebar' }, fiber, disabled: false }],
     },
     logger: { info: () => {}, warn: () => {} },
     profileContext: undefined,

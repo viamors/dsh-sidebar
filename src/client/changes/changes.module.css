@@ -54,73 +54,75 @@
 
 .scmHeader { display: flex; align-items: center; min-height: 28px; padding: 0 6px; }
 .scmDisclosure { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0; border: none; background: transparent; color: var(--dsw-alias-label-primary); font: var(--dsw-font-xxs-strong-12); text-align: left; cursor: pointer; }
+.scmActions { display: flex; align-items: center; gap: 2px; opacity: 0; }
+.scmHeader:hover .scmActions, .scmHeader:focus-within .scmActions { opacity: 1; }
+@media (hover: none) { .scmActions { opacity: 1; } }
 
-/* ── Pill toolbar (docked at the top) ──────────────────────────────────── */
+/* Child repositories of a workspace container: every view in this panel is
+   pinned to ONE root, so the switcher is the only surface that says the others
+   exist. One band above the sections, one chip per discovered root; it scrolls
+   sideways rather than wrapping so a deep root list cannot push the changes
+   away from the top of the pane. */
+.repoSwitcher {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 6px 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.repoSwitcher::-webkit-scrollbar { display: none; }
+.repoChip {
+  flex: none;
+  max-width: 160px;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxxs-11);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.repoChip:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.repoChip[data-active='true'] {
+  border-color: var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-interactive-bg-hover-accent);
+  color: var(--dsw-alias-label-primary);
+}
+.repoChip:disabled { opacity: 0.45; cursor: default; }
+.repoChip:focus-visible { outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent); outline-offset: -2px; }
 
-/* A COLUMN: the chip row first, the failed-action notice UNDER it (a row
-   would have put the notice beside the row, squeezing the chips into a
-   sliver on a narrow panel). No z-index on purpose — in a floating window the
-   host's resize grip is the last child at `z-index: auto`, so a stacking
-   toolbar would paint over the bottom-right corner and make the grip
-   un-hittable. No top padding either: `.git` already insets the band by the
-   6px rhythm, and doubling it pushed the chips off the scroll body's edge. */
-.gitToolbar { flex: none; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 0 8px 6px; }
-.toolbarRow { flex: 1; width: 100%; min-width: 0; display: flex; align-items: center; gap: 8px; }
-/* The chips WRAP instead of being clipped: `overflow: hidden` here used to cut
-   the branch chip in half on a narrow panel, and the branch chip is a route to
-   `checkout()`. Wrapping costs one line of height at the breakpoint and keeps
-   every chip whole; the More menu carries the same repo/branch rows anyway. */
-.toolbarPills { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; overflow: visible; }
-.toolbarActions { flex: none; display: flex; align-items: center; gap: 2px; }
-/* The tab's lens switch, when it hands one in: it rides in the same band but
-   never shrinks (it is the only way to change lens). */
-.lensSwitch { flex: none; display: flex; align-items: center; }
+/* Docked by the flex column above (a sibling of `.gitScroll`), plus sticky so
+   it also survives the case where the host tab body itself scrolls the whole
+   tab — the branch control must never leave the bottom of the pane.
+   NO z-index: in a floating window the host's resize grip is the last child
+   at `z-index: auto`, so a stacking footer paints over the bottom-right
+   corner and makes the grip un-hittable. Sticky (positioned) already paints
+   above the scrolled rows. */
+.gitFooter { flex: none; min-width: 0; position: sticky; bottom: 0; border-top: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-base); }
+.footerRow { display: flex; align-items: center; min-width: 0; min-height: 28px; }
 
-/* The More menu's trigger. A plain <button> rather than the kit's
-   `IconButton`: the kit one only publishes `aria-pressed`, and a menu trigger
-   has to announce `aria-haspopup` / `aria-expanded`. Sized and painted like
-   the kit's `size="sm"` button it replaces. */
-.toolbarIcon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
-.toolbarIcon:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.toolbarIcon:focus-visible { outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent); outline-offset: -1px; }
-.toolbarIcon[data-active='true'] { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); }
-.toolbarIcon:disabled { opacity: 0.45; cursor: default; }
-
-/* The lens switch itself: a real segmented control from this plugin's own
-   sheet. The host's `wSkVaW_tab*` classes were private and had already been
-   dropped from the installed build, which left two browser-default buttons. */
-.segmented { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-layer-1); }
-.segment { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border: none; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxxs-11); cursor: pointer; }
-.segment:not(.segmentActive):hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.segment:focus-visible { outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent); outline-offset: -1px; }
-.segmentActive { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 500; }
-.segment:disabled { opacity: 0.45; cursor: default; }
-
-/* A chip: outlined pill, label + chevron (+ the line totals for the branch
-   one). `max-width: 100%` keeps a single long upstream ref from widening the
-   row; the inner spans ellipsize. */
-.pill { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; height: 24px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxxs-11); cursor: pointer; }
-.pill:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
-.pill:focus-visible { outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent); outline-offset: -1px; }
-.pill:disabled { opacity: 0.45; cursor: default; }
-.pill > svg { flex: none; }
-.pill > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The chip's category word ("Branch") is the quiet part; the value and the
-   numbers carry the weight. */
-.pillLabel { flex: none; color: var(--dsw-alias-label-tertiary); }
-.pillChevron { flex: none; opacity: 0.65; }
-.pillCounts { flex: none; display: inline-flex; align-items: center; }
-.pillMenu { display: flex; min-width: 0; max-width: 100%; }
-.pillMenu > * { min-width: 0; }
-
-/* A failed remote op reports under the toolbar and git's stderr can be long:
+/* A failed remote op reports above the branch row and git's stderr can be long:
    it keeps its own height (never truncated) but gets a dismiss control instead
-   of living in the docked row until the next action. */
-.actionError { display: flex; align-items: flex-start; gap: 6px; white-space: normal; margin: 0 8px; }
+   of living in the docked footer until the next action. */
+.actionError { display: flex; align-items: flex-start; gap: 6px; white-space: normal; }
 .actionErrorText { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* No height cap here on purpose: the host's own `.scrollable` card rule
-   (viewport-fit max-height + a scrolling `.viewport`) is what a long row list
-   needs, and it only applies while no row carries a `submenu`. */
+.branchMenu { display: flex; flex: 1; min-width: 0; }
+.branchButton, .syncButton { display: flex; align-items: center; gap: 5px; min-width: 0; min-height: 28px; padding: 3px 8px; border: none; background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxxs-11); cursor: pointer; }
+.branchButton { flex: 1; text-align: left; }
+.syncButton { max-width: 55%; }
+.branchButton svg, .syncButton svg { flex: none; }
+.branchButton span, .syncButton span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branchButton:hover:not(:disabled), .syncButton:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.branchButton:disabled, .syncButton:disabled { opacity: 0.45; cursor: default; }
 
 /* ── Change groups (one directory tree each) ───────────────────────────── */
 
@@ -275,26 +277,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The Changes header's working-tree summary: always visible, unlike the
-   hover-revealed actions beside it, and capped so a huge count set can never
-   push the actions out of the header (40% of the row leaves the disclosure and
-   the three buttons their room; the counts ellipsize instead of overflowing). */
-.treeTotals {
-  flex: none;
-  max-width: 40%;
-  overflow: hidden;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-right: 6px;
-  white-space: nowrap;
-}
-
-/* The pair is the chip's only shrinkable content, so the cap above costs the
-   counts characters (`+12… −1…`) rather than the actions their place. */
-.treeTotals > .lineCounts { flex: 0 1 auto; min-width: 0; overflow: hidden; }
-.treeTotals > .lineCounts > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-
 /* The stand-ins for "no numbers exist": a binary change and an untracked (new)
    file. Quiet tertiary ink — they are a state, not a measurement. */
 .lineNote {
@@ -315,44 +297,6 @@
 @media (hover: none) {
   .row:not(:hover):not(:focus-within) .rowAction { opacity: 1; }
 }
-
-/* ── File filter (inside Changes) ───────────────────────────────────────── */
-
-/* A compact frame above the groups: typing narrows the list in place, so it
-   sits where the rows begin rather than in the header's action cluster. Named
-   `gitFilterRow` because SessionLens owns plain `.filterRow` further down (its
-   `padding: 6px 12px` / `flex-wrap: wrap` used to win here by source order). */
-.gitFilterRow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 8px 6px;
-  min-height: 28px;
-  box-sizing: border-box;
-  padding: 0 2px 0 8px;
-  border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-tertiary);
-}
-.gitFilterRow:focus-within { border-color: var(--dsw-alias-state-business-primary); }
-
-.filterIcon { flex: none; display: inline-flex; }
-
-.filterInput {
-  flex: 1;
-  min-width: 0;
-  height: 22px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: var(--dsw-font-xxs-12);
-  outline: none;
-}
-.filterInput::placeholder { color: var(--dsw-alias-label-dimmed); }
-
-.filterClear { flex: none; width: 20px; height: 20px; }
 
 /* ── Message draft (inside Changes) ─────────────────────────────────────── */
 
@@ -644,7 +588,7 @@
 /* ── Shared preview pane ───────────────────────────────────────────────── */
 
 .redactBanner { flex: none; font: var(--dsw-font-xxxs-strong-11); padding: 2px 8px; border-radius: 2px; color: var(--dsw-alias-state-warn-primary); background: var(--dsw-alias-interactive-bg-hover); white-space: nowrap; }
-.mdBody { padding: 12px 16px 20px; font: var(--dsw-font-xs-regular-13); line-height: 1.6; min-height: 0; overflow-y: auto; }
+.mdBody { padding: 12px 16px 20px; font: var(--dsw-font-xs-13); line-height: 1.6; min-height: 0; overflow-y: auto; }
 .htmlPane { flex: 1; min-height: 0; display: flex; }
 .htmlFrame { flex: 1; width: 100%; border: none; background: var(--dsw-alias-bg-base); }
 
@@ -702,7 +646,8 @@
 /* Keyboard focus rings match the shared sidebar convention (the kit atoms and
    the tree rows carry their own). */
 .opRow:focus-visible, .scmDisclosure:focus-visible,
-.suggestButton:focus-visible, .select:focus-visible, .dragHandle:focus-visible {
+.branchButton:focus-visible, .syncButton:focus-visible, .suggestButton:focus-visible,
+.select:focus-visible, .dragHandle:focus-visible {
   outline: 2px solid var(--dsw-alias-interactive-bg-hover-accent);
   outline-offset: -1px;
 }
@@ -710,3 +655,45 @@
 @media (prefers-reduced-motion: reduce) {
   .row { animation: none; }
 }
+
+/* ── File filter + tree totals (vimors fork additions) ───────────────── */
+.treeTotals {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+.treeTotals > .lineCounts { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.treeTotals > .lineCounts > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.gitFilterRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 6px;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 0 2px 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+}
+.gitFilterRow:focus-within { border-color: var(--dsw-alias-state-business-primary); }
+.filterIcon { flex: none; display: inline-flex; }
+.filterInput {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12);
+  outline: none;
+}
+.filterInput::placeholder { color: var(--dsw-alias-label-dimmed); }
+.filterClear { flex: none; width: 20px; height: 20px; }

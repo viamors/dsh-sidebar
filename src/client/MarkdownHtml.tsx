@@ -11,16 +11,19 @@
  * open-tag attributes) goes through DOMPurify with an explicit denylist on
  * top of its defaults (no script/style/iframe/forms), anchors are forced to
  * open in a new tab with noopener, and local media goes through the
- * session-scoped `/sidebar/file` media route — markdown-syntax image
- * destinations are rewritten via `markdown-images.ts` and `src` attributes
- * through `resolveLocalMediaDest` (the same trust fence).
+ * session-scoped `/sidebar/file` media route — `src` attributes via
+ * `resolveLocalMediaDest` (the same trust fence). Markdown-syntax images are
+ * resolved by the owning surface's `pathImages` vocabulary
+ * (`markdown-images.ts`); that is what keeps them same-origin in the desktop
+ * shell.
  */
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { createElement, type ReactNode } from 'react'
 import DOMPurify from 'dompurify'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { MarkdownPathImages } from '@deepseek-ai/dsh-client-ui-primitives'
 import { markdownTextProps, type MarkdownCopyLabels } from './markdown-labels.tsx'
-import { resolveLocalMediaDest, rewriteLocalImageUrls } from './markdown-images.ts'
+import { resolveLocalMediaDest } from './markdown-images.ts'
 import { rewriteLocalMarkdownLinks } from './markdown-navigation.ts'
 import {
   analyzeHtmlSegment,
@@ -41,8 +44,10 @@ import { LazyMermaidMarkdown } from './mermaid-lazy.tsx'
 export interface MarkdownHtmlMedia {
   scope: SessionScope
   path: string
-  /** The injected transport base, reverse-proxy prefix included. */
+  /** The PAGE base, reverse-proxy prefix included (`hostHttpBase()`). */
   baseUrl: string
+  /** The owner's local-path image vocabulary for markdown runs. */
+  pathImages?: MarkdownPathImages | undefined
 }
 
 /** Tag-like text in a rendered text node — the inline pass gate. */
@@ -83,10 +88,32 @@ function postProcessSanitized(root: Element, media: MarkdownHtmlMedia): void {
   }
 }
 
+/**
+ * Rewrite authored `file:` media URLs before DOMPurify sees them. The
+ * sanitizer's URI allowlist drops a raw `file:` scheme (it is not a browser
+ * subresource the GUI can load), so a raw-HTML `<img src="file:///…">` would
+ * lose its src entirely. The file URL is a local path in another spelling:
+ * map it through the same media route as a relative src first, then sanitize
+ * the resulting http URL. Sources without a file URL are returned untouched.
+ */
+function rewriteFileUrlMedia(source: string, media: MarkdownHtmlMedia): string {
+  if (!/file:/i.test(source)) return source
+  const template = document.createElement('template')
+  template.innerHTML = source
+  for (const element of template.content.querySelectorAll('img, video, audio, source')) {
+    for (const attribute of ['src', 'poster']) {
+      const value = element.getAttribute(attribute)
+      if (value === null || !/^file:/i.test(value.trim())) continue
+      element.setAttribute(attribute, resolveLocalMediaDest(value, media.scope, media.path, media.baseUrl))
+    }
+  }
+  return template.innerHTML
+}
+
 /** Sanitize one balanced HTML span into markup for dangerouslySetInnerHTML. */
 function sanitizeHtmlBlock(source: string, media: MarkdownHtmlMedia): string {
   const holder = document.createElement('div')
-  holder.innerHTML = DOMPurify.sanitize(source, {
+  holder.innerHTML = DOMPurify.sanitize(rewriteFileUrlMedia(source, media), {
     FORBID_TAGS: PURIFY_FORBID_TAGS,
     FORBID_ATTR: PURIFY_FORBID_ATTR,
   })
@@ -103,7 +130,7 @@ function sanitizeHtmlBlock(source: string, media: MarkdownHtmlMedia): string {
  */
 function sanitizeInlineHtml(text: string, media: MarkdownHtmlMedia): string | null {
   const holder = document.createElement('span')
-  holder.innerHTML = DOMPurify.sanitize(text, {
+  holder.innerHTML = DOMPurify.sanitize(rewriteFileUrlMedia(text, media), {
     FORBID_TAGS: PURIFY_FORBID_TAGS,
     FORBID_ATTR: PURIFY_FORBID_ATTR,
   })
@@ -231,28 +258,57 @@ interface MarkdownSegmentProps {
  * skips its own output, so mutation feedback settles after one extra pass.
  */
 function MarkdownSegment({ text, hasMermaid, media, codeLabels }: MarkdownSegmentProps): ReactNode {
+  const pathImages = media.pathImages
   const containerRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const container = containerRef.current
     if (container === null) return
     runInlineHtmlPass(container, media)
-    let scheduled = false
+    let timer: number | undefined
+    /** A pass was skipped because the page was hidden; flush it on return. */
+    let dirty = false
+    const runPass = (): void => {
+      // Only `hidden` pauses the pass; jsdom reports a non-visible state too,
+      // and the initial pass already ran there.
+      if (document.visibilityState === 'hidden') {
+        dirty = true
+        return
+      }
+      dirty = false
+      runInlineHtmlPass(container, media)
+    }
     const observer = new MutationObserver(() => {
-      if (scheduled) return
-      scheduled = true
-      queueMicrotask(() => {
-        scheduled = false
-        runInlineHtmlPass(container, media)
-      })
+      if (timer !== undefined) return
+      // Coalesce a burst of mutations (shiki settling, diagram swaps, inline
+      // HTML injection) into one pass: the scan walks every text node in the
+      // document, so a pass per mutation turns a diagram-heavy render into a
+      // stream of full-document scans.
+      timer = window.setTimeout(() => {
+        timer = undefined
+        runPass()
+      }, 80)
     })
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'hidden' || !dirty) return
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+        timer = undefined
+      }
+      runPass()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
     observer.observe(container, { childList: true, subtree: true })
-    return () => { observer.disconnect() }
+    return () => {
+      observer.disconnect()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
   }, [text, media])
   return (
     <div ref={containerRef}>
       {hasMermaid
-        ? <LazyMermaidMarkdown text={text} codeLabels={codeLabels} />
-        : <MarkdownText {...markdownTextProps(text, codeLabels)} />}
+        ? <LazyMermaidMarkdown text={text} codeLabels={codeLabels} pathImages={pathImages} />
+        : <MarkdownText {...markdownTextProps(text, codeLabels, pathImages)} />}
     </div>
   )
 }
@@ -296,18 +352,14 @@ export function MarkdownDocument({ info, media, codeLabels }: MarkdownDocumentPr
     if (segment.kind === 'markdown') {
       const defs = info.referenceDefinitions
       const raw = defs === '' ? segment.text : `${segment.text}\n\n${defs}`
-      // MarkdownText drops non-http(s) image destinations (chat-security
-      // stance), so rewrite local ones into /sidebar/file media URLs first —
-      // the same trust fence the sanitized HTML leaves below go through.
-      // Idempotent: already-absolute media URLs pass through untouched.
-      // The link pass follows (it must see the media URLs already in place):
-      // it carries a heading fragment past the host parser and keeps every
-      // local destination the plugin does not claim inert.
-      const text = rewriteLocalMarkdownLinks(
-        rewriteLocalImageUrls(raw, media.scope, media.path, media.baseUrl),
-        media.path,
-        media.scope.cwd,
-      )
+      // Local image destinations stay as authored: the enclosing surface's
+      // `pathImages` vocabulary resolves them at render time (see
+      // markdown-images.ts — a rewritten URL could not be vouched for from the
+      // desktop shell's `dsh-app://` page). The link pass runs here so a
+      // heading fragment survives the host parser and every local link the
+      // plugin does not claim stays inert; image-referenced definitions are
+      // left alone by that pass so the renderer can still resolve them.
+      const text = rewriteLocalMarkdownLinks(raw, media.path, media.scope.cwd)
       return {
         kind: 'markdown',
         text,

@@ -7,7 +7,7 @@
   <a href="https://github.com/omdsh-dev/DSH-better-sidebar/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/omdsh-dev/DSH-better-sidebar/actions/workflows/ci.yml/badge.svg" /></a>
   <a href="https://github.com/omdsh-dev/DSH-better-sidebar/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/omdsh-dev/DSH-better-sidebar" /></a>
   <a href="https://opensource.org/licenses/MIT"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg" /></a>
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="Supported DSH versions: 0.2.1-rc.1+" src="https://img.shields.io/badge/DSH-0.2.1--rc.1%2B-4d6bfe" /></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="Supported DSH versions: 0.2.2-rc.1+" src="https://img.shields.io/badge/DSH-0.2.2--rc.1%2B-4d6bfe" /></a>
 </div>
 
 <div align="center">
@@ -42,16 +42,17 @@ With the `dsh-context` plugin installed, three places offer a one-click jump int
 dsh plugin --profile web add @vimors/dsh-sidebar
 ```
 
-Then **hard-refresh the browser** (Cmd/Ctrl+Shift+R). Requires DSH **0.2.1-rc.1+**.
+Then **hard-refresh the browser** (Cmd/Ctrl+Shift+R). Requires DSH **0.2.2-rc.1+**.
 
-> **Compatibility warning — match the plugin to the host line.** As of 2026-10-28, DSH's npm `latest` is **0.2.1-rc.2**, so the command above installs the compatible v0.29.0. Hosts still on **0.2.0-rc.2** must pin `dsh-better-sidebar@0.26.1` (and should upgrade the host to `0.2.1-rc.2` first); DSH 0.2.1-alpha.5 users must pin `dsh-better-sidebar@0.28.0-alpha.0`. The marketplace installer picks the plugin's `latest` regardless of host version, so an old host gets a version-rejection error — upgrade the host or pin the version explicitly. The two packages' `latest` tags are independent.
+> **Compatibility warning — match the plugin to the host line.** As of 2026-11-04, DSH's npm `latest` is **0.2.1-rc.5** and `next` is **0.2.2-rc.1**. **v0.31.1 requires DSH 0.2.2-rc.1+**; hosts on the 0.2.1 line (**0.2.1-rc.1 ~ rc.5**, i.e. today's `latest`) must pin `dsh-better-sidebar@0.28.2` — v0.29.0 was never published to npm. DSH 0.2.1-alpha.5 users must pin `dsh-better-sidebar@0.28.0-alpha.0`, and hosts still on **0.2.0-rc.2** must pin `dsh-better-sidebar@0.26.1`. A 0.x caret never spans a minor version, so one plugin build cannot serve two host lines. The marketplace installer picks the plugin's `latest` regardless of host version, so an old host gets a version-rejection error — upgrade the host or pin the version explicitly. The two packages' `latest` tags are independent.
 
 <details>
 <summary><b>Pick the plugin version for your DSH version</b></summary>
 
 | Your DSH version | Install command |
 | --- | --- |
-| **0.2.1-rc.1+** | `dsh plugin --profile web add @vimors/dsh-sidebar@1.0.0` |
+| **0.2.2-rc.1+** | `dsh plugin --profile web add @vimors/dsh-sidebar@1.2.0` (this fork) |
+| **0.2.1-rc.1 ~ 0.2.1-rc.5** | `dsh plugin --profile web add dsh-better-sidebar@0.28.2` (official package) |
 | **0.2.1-alpha.5** | `dsh plugin --profile web add dsh-better-sidebar@0.28.0-alpha.0` |
 | **0.2.0-rc.2** | `dsh plugin --profile web add dsh-better-sidebar@0.26.1` |
 | **0.2.0-rc.1** | `dsh plugin --profile web add dsh-better-sidebar@0.24.1` |
@@ -70,12 +71,12 @@ Always pin **exact versions** for older releases (`latest` moves forward with ea
 
 ```text
 Install the dsh-better-sidebar plugin (a sidebar workbench for DSH):
-1. Confirm DSH is 0.2.1-rc.1 or newer, then run dsh plugin --profile web add @vimors/dsh-sidebar@1.0.0
+1. Confirm DSH is 0.2.2-rc.1 or newer, then run dsh plugin --profile web add @vimors/dsh-sidebar@1.2.0
 2. Remind me to hard-refresh the browser (Cmd/Ctrl+Shift+R) afterwards
 If something fails, check the FAQ table in https://github.com/omdsh-dev/DSH-better-sidebar README first.
 ```
 
-**One-line script** — clone this repo and run `bash scripts/install.sh 0.29.0` (macOS / Linux / Windows Git Bash; `./scripts/install.ps1 -Version 0.29.0` for native Windows). It handles installation + bundle registration.
+**One-line script** — clone this repo and run `bash scripts/install.sh 0.31.1` (macOS / Linux / Windows Git Bash; `./scripts/install.ps1 -Version 0.31.1` for native Windows). It handles installation + bundle registration.
 
 **Updating**: just re-run the install command, then hard-refresh the browser.
 
@@ -89,10 +90,11 @@ If something fails, check the FAQ table in https://github.com/omdsh-dev/DSH-bett
 | `Ignored build scripts` error | pnpm 11 blocked a transitive dependency's build script. Run `pnpm approve-builds` in the profile directory (`~/.dsh/profiles/web`) — this plugin itself has no build-script dependencies. |
 | `minimum release age` / version younger than 24h | The release is less than 24 hours old. Wait 24h or re-run (pnpm auto-adds `minimumReleaseAgeExclude`). |
 | "Profile directory not found" | Run `dsh web` once to initialize `~/.dsh/profiles/web`. |
+| Host dies on start: `DesktopHostFatalError: … required plugins did not activate / better-sidebar` | The profile carries its own `@deepseek-ai/dsh-*` copies (left by an older DSH, or listed in the profile's `package.json` / overrides) and they resolve ahead of the installation, so the `dsh-subagent` this plugin imports statically binds to a mixed set; when an export is missing the host only reports this fatal and never names the package. Confirm with the check shipped in the current plugin: `node ~/.dsh/profiles/web/node_modules/dsh-better-sidebar/scripts/check-profile-host-tree.mjs ~/.dsh/profiles/web`. Fix: remove `@deepseek-ai/dsh-*` from the profile's `package.json` / overrides and `pnpm install` there (the installation then supplies them), or align both copies to one version; then restart. The install scripts run this check for you. |
 | **Two sidebars** on the page | Double mounting. Remove the legacy manual mount line (`- insert: ... better-sidebar ...`) from `~/.dsh/profiles/web/cordis.patch.yml`; aggregate packages mounting this package under a different id are auto-yielded, no action needed. |
 | Settings values gone after upgrade | Since DSH 0.1.7, preferences live on this plugin's mount row in the profile (default entry id `better-sidebar`). The plugin migrates your old `settings.yaml` values once on first start and never overwrites newer values. |
 | Terminal unavailable | Terminals are provided by **DSH itself** (this plugin ships no PTY) — see DSH docs; "host provides no terminal capability" in the bottom terminal means this deployment has no terminal controller mounted. |
-| `dsh: command not found` | Install DSH first; or use `npx -y --package @deepseek-ai/dsh@0.2.1-rc.1 dsh plugin --profile web add @vimors/dsh-sidebar@1.0.0`. |
+| `dsh: command not found` | Install DSH first; or use `npx -y --package @deepseek-ai/dsh@0.2.2-rc.1 dsh plugin --profile web add @vimors/dsh-sidebar@1.2.0`. |
 
 </details>
 
@@ -116,39 +118,23 @@ Run DSH on a Windows host and open a project that lives **inside a WSL2 distribu
 
 ## 🆕 Recent Updates
 
-**v0.29.0 — GenUI in side chats**
+**v0.31.1 — `file://` image URLs in Markdown**
 
-- Adds the opt-in `registerSidechatSurfaceAdapter` service for GenUI 0.15.0. Settled assistant replies can render interactive components, with actions and state kept in the owning child thread.
-- Uninstalled consumers, streaming replies and unsupported fences retain the existing Markdown view. The 0.28.2 cold-session read fix remains included.
-- Provider contribution: [@sunxiuguo](https://github.com/sunxiuguo), [#1033](https://github.com/omdsh-dev/DSH-better-sidebar/pull/1033).
+- **`file:///...` images now render**: a Markdown-syntax or raw-HTML `file:` URL is converted to an absolute local path and served by the same session media route as a relative image; Windows drives, `localhost`, UNC and percent-encoding are covered.
 
-**v0.28.2 — large-session cold-read fix**
+**v0.31.0 — local-image and desktop-shell preview fixes**
 
-- **Root cause fixed**: a detached session's cwd no longer decodes the whole session log — it reads the workspace address stored in the header (first zstd frame only, header-only), memoized per session with in-flight sharing; `activeWorktreeRootOf` no longer folds the stored log for a detached session
-- **Why 0.28.1 missed it**: the single-flight only covered `/sidebar/api`, while the real startup fan-out is one fs-watch frame per watched directory and one cwd resolution per `/sidebar/file|html` resource — a 39 MB session was still fully decoded dozens of times in parallel
-- **Behavior**: an attached session still follows `working_directory` and linked worktrees; before attach the sidebar roots at the original project and the next 5 s poll switches back
-- **Measured (40.2 MB session, local)**: 12 routes + 36 bypass-entry calls concurrently → 1 header read, 0 full reads, 3 ms, +0.3 MB RSS; pre-fix, 6 bypass calls were 6 full reads with a +1.0 GB peak (≈6 GB extrapolated for 36)
+- **Markdown previews show local images again**: relative/absolute paths no longer collapse to alt text in the desktop shell because their media URL is no longer cross-site; Markdown-syntax `data:image` renders too (`data:text/html` and friends stay rejected).
+- **Sandboxed HTML previews in the desktop shell no longer render blank**: the trusted top frame fetches the document and its relative CSS/JS/images/fonts and inlines them into a sandboxed Blob; the iframe still has no `allow-same-origin`, and the browser / explicitly-unsandboxed paths are unchanged.
+- **Also in this release**: the task, editor and side-chat fixes merged into dev after 0.30.1.
 
-**v0.28.1 — UX and reliability patch**
+**v0.30.1 — settings nav icon fix**
 
-- **OOM fix**: cold cwd reads shared by the twelve `/sidebar/*` routes are merged per session and client hint, so a session-switch burst no longer decodes the same large session log N times in parallel
-- **Silent wrong-file writes are gone**: tab reconciliation now covers tabs in background sessions, and worktree sessions use one address base — a renamed/deleted file is no longer re-created on the next save, and a chat link never opens a same-named file from another checkout
-- **Host crash guard**: pathological `git status` output is capped with a latch and a process-tree kill, turning "host dies with `RangeError`" into one failed SCM refresh
-- **Git page**: histories with more than 1,000 branches load again; tags now decorate commits, rows and details, and tag changes invalidate pagination
-- **Editor**: saving after an mtime-only change no longer deadlocks on `fs-conflict`; the reading position survives tab re-seating; “Add to conversation” lands as a compact reference chip and never flattens earlier chips
-- **Markdown links**: local destinations normalize Windows backslashes, so `C:\ws\_analysis\report.md` opens instead of a bare ENOENT
-- **Sidebar**: the bottom-workbench toggle stays visible while the right panel is open; the macOS dock fallback avoids the traffic lights; a content-stable tab scope ends needless full-file re-reads; closing a side-chat tab archives its session
-
-**v0.28.0 — stable plugin release for DSH 0.2.1-rc.1+**
-
-- Move all 13 DSH peer floors to `^0.2.1-rc.1`; retain the alpha.0 functionality without runtime changes
-- The upstream alpha.5 → rc.1 full-tree diff contains 355 files, all `package.json`; no source changes
-- DSH 0.2.0-rc.2 hosts stay on plugin v0.26.1; DSH 0.2.1-alpha.5 hosts stay on v0.28.0-alpha.0
-- Validation: [RC adaptation record](./docs/plans/2026-10-17-dsh-0.2.1-rc.1-adaptation.md)
+- **The "Side card" row in Settings no longer shows two icons.** The plugin used to paint its own glyph over the shell's fallback gear with a CSS mask; the shell now wraps the nav icon in a container and exposes a per-section icon slot. The row contributes its icon through that slot, and the stale marker + CSS apparatus is gone — along with a document-wide DOM observer.
 
 ## 🔌 Plugin Ecosystem
 
-`ctx.betterSidebar` offers two extension points to every plugin — `registerTab` / `registerFileViewer`; the built-in 6 tabs + 4 viewers use the very same API. The GitHub topic [`dsh-better-sidebar`](https://github.com/topics/dsh-better-sidebar) already lists **30+ ecosystem plugins**; the full integration guide is at **[docs/external-plugin-guide.md](./docs/external-plugin-guide.md)**.
+`ctx.betterSidebar` offers five extension points to every plugin — `registerTab` / `registerFileViewer` / `registerFileIcon` / `registerFileAction` / `registerTabAction`; the built-in 6 tabs + 5 viewers use the very same API. The GitHub topic [`dsh-better-sidebar`](https://github.com/topics/dsh-better-sidebar) already lists **30+ ecosystem plugins**; the full integration guide is at **[docs/external-plugin-guide.md](./docs/external-plugin-guide.md)**.
 
 ```ts
 import type {} from 'dsh-better-sidebar'  // triggers the ctx.betterSidebar type merge
@@ -239,7 +225,7 @@ export function apply(ctx: Context) {
 
 - Routes sit behind a Host-header trust fence (same as `/api`); `fs.write` is atomic; git is only invoked via CLI and never sets identity
 - ⚠️ **Since v0.23.0 the fs routes do no workspace-containment check**: they can read/write any path the host user can reach (OS permissions only) — callers must not treat these routes as fenced
-- HTML previews render in an **opaque-origin sandboxed iframe**; the sandbox can be disabled per feature in settings (off by default, with warnings)
+- HTML previews render in an **opaque-origin sandboxed iframe** and serve relative CSS, JavaScript, JSON, fonts and WebAssembly with their content types; the sandbox can be disabled per feature in settings (off by default, with warnings)
 - No git push/pull/fetch; the file tree only watches **expanded** directories; Markdown preview renders the saved file
 - Read-only formats (spreadsheets / PDF / images / Office) are rendered by DSH's own document preview and follow the host version; the browser view only exists in the desktop profile
 - Unsaved drafts are confirmed before closing a tab / deleting a file / refreshing; saving after external modification is rejected, never silently overwritten
@@ -283,6 +269,8 @@ QQ group: 577011007
 <a href="https://github.com/omdsh-dev/DSH-better-sidebar/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=omdsh-dev/DSH-better-sidebar" alt="Contributors" />
 </a>
+
+Text list for the current unreleased cycle: [CONTRIBUTORS.md](./CONTRIBUTORS.md).
 
 ## 🔗 Friends
 

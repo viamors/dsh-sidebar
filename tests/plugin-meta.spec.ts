@@ -121,8 +121,10 @@ describe('DSH plugin presentation metadata', () => {
     const dir = mkdtempSync(join(tmpdir(), 'plugin-meta-pack-'))
     try {
       execFileSync('pnpm', ['pack', '--pack-destination', dir], { cwd: ROOT, stdio: 'pipe', shell: process.platform === 'win32' })
-      const contents = execFileSync('tar', ['-tzf', `${pkg.name}-${pkg.version}.tgz`], { cwd: dir, encoding: 'utf8' })
-      const files = contents.split('\n')
+      const contents = execFileSync('tar', ['-tzf', `${pkg.name.replace('@', '').replace('/', '-')}-${pkg.version}.tgz`], { cwd: dir, encoding: 'utf8' })
+      // Windows tar terminates listing lines with \r\n: strip the \r so the
+      // `package/<file>` expectations match on every platform.
+      const files = contents.split('\n').map(line => line.replace(/\r$/, ''))
       expect(files, `${ICON} must be published`).toContain(`package/${ICON}`)
       for (const [name] of locales()) {
         expect(files, `${LOCALE_DIR}/${name} must be published`).toContain(`package/${LOCALE_DIR}/${name}`)

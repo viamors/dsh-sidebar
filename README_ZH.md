@@ -7,7 +7,7 @@
   <a href="https://github.com/omdsh-dev/DSH-better-sidebar/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/omdsh-dev/DSH-better-sidebar/actions/workflows/ci.yml/badge.svg" /></a>
   <a href="https://github.com/omdsh-dev/DSH-better-sidebar/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/omdsh-dev/DSH-better-sidebar" /></a>
   <a href="https://opensource.org/licenses/MIT"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg" /></a>
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.2.1-rc.1+" src="https://img.shields.io/badge/DSH-0.2.1--rc.1%2B-4d6bfe" /></a>
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.2.2-rc.1+" src="https://img.shields.io/badge/DSH-0.2.2--rc.1%2B-4d6bfe" /></a>
 </div>
 
 <div align="center">
@@ -42,16 +42,17 @@
 dsh plugin --profile web add @vimors/dsh-sidebar
 ```
 
-装完**硬刷新浏览器**（Cmd/Ctrl+Shift+R）即可。要求 DSH **0.2.1-rc.1+**。
+装完**硬刷新浏览器**（Cmd/Ctrl+Shift+R）即可。要求 DSH **0.2.2-rc.1+**。
 
-> **兼容性警告：插件版本必须与宿主线匹配。** 截至 2026-10-28，DSH 的 npm `latest` 是 **0.2.1-rc.2**，上方命令安装的 v0.29.0 与之兼容。仍停留在 **0.2.0-rc.2** 的宿主必须固定 `dsh-better-sidebar@0.26.1`（并建议先升级宿主到 `0.2.1-rc.2`）；DSH 0.2.1-alpha.5 用户固定 `dsh-better-sidebar@0.28.0-alpha.0`。市场安装器按插件的 `latest` 安装、不按宿主版本选版本，旧宿主会收到版本拒绝错误——请升级宿主或显式固定版本。两个包的 `latest` 标签不是同一支持线。
+> **兼容性警告：插件版本必须与宿主线匹配。** 截至 2026-11-04，DSH 的 npm `latest` 是 **0.2.1-rc.5**、`next` 是 **0.2.2-rc.1**。**v0.31.1 要求 DSH 0.2.2-rc.1+**；仍停在 0.2.1 线（**0.2.1-rc.1 ~ rc.5**，也就是今天的 `latest`）的宿主必须固定 `dsh-better-sidebar@0.28.2`——v0.29.0 从未发布到 npm。DSH 0.2.1-alpha.5 用户固定 `dsh-better-sidebar@0.28.0-alpha.0`，**0.2.0-rc.2** 宿主固定 `dsh-better-sidebar@0.26.1`。0.x 的 caret 不跨 minor，因此一个构建无法同时服务两条宿主线。市场安装器按插件的 `latest` 安装、不按宿主版本选版本，旧宿主会收到版本拒绝错误——请升级宿主或显式固定版本。两个包的 `latest` 标签不是同一支持线。
 
 <details>
 <summary><b>按 DSH 版本选插件版本</b></summary>
 
 | 你的 DSH 版本 | 安装命令 |
 | --- | --- |
-| **0.2.1-rc.1+** | `dsh plugin --profile web add @vimors/dsh-sidebar@1.0.0` |
+| **0.2.2-rc.1+** | `dsh plugin --profile web add @vimors/dsh-sidebar@1.2.0`（本 Fork） |
+| **0.2.1-rc.1 ~ 0.2.1-rc.5** | `dsh plugin --profile web add dsh-better-sidebar@0.28.2`（官方包） |
 | **0.2.1-alpha.5** | `dsh plugin --profile web add dsh-better-sidebar@0.28.0-alpha.0` |
 | **0.2.0-rc.2** | `dsh plugin --profile web add dsh-better-sidebar@0.26.1` |
 | **0.2.0-rc.1** | `dsh plugin --profile web add dsh-better-sidebar@0.24.1` |
@@ -70,12 +71,12 @@ dsh plugin --profile web add @vimors/dsh-sidebar
 
 ```text
 帮我安装 dsh-better-sidebar 插件（DSH 侧边栏工作台），步骤：
-1. 先确认 DSH 为 0.2.1-rc.1 或更新版本，再执行 dsh plugin --profile web add @vimors/dsh-sidebar@1.0.0
+1. 先确认 DSH 为 0.2.2-rc.1 或更新版本，再执行 dsh plugin --profile web add @vimors/dsh-sidebar@1.2.0
 2. 完成后提醒我硬刷新浏览器（Cmd/Ctrl+Shift+R）
 遇到报错先查 https://github.com/omdsh-dev/DSH-better-sidebar README 的常见问题表。
 ```
 
-**一键脚本**——克隆本仓库后执行 `bash scripts/install.sh 0.29.0`（macOS / Linux / Windows Git Bash；Windows 原生用 `./scripts/install.ps1 -Version 0.29.0`），自动完成安装 + bundle 注册。
+**一键脚本**——克隆本仓库后执行 `bash scripts/install.sh 0.31.1`（macOS / Linux / Windows Git Bash；Windows 原生用 `./scripts/install.ps1 -Version 0.31.1`），自动完成安装 + bundle 注册。
 
 **更新**：重跑一次安装命令即可，然后硬刷新浏览器。
 
@@ -89,15 +90,11 @@ dsh plugin --profile web add @vimors/dsh-sidebar
 | 报 `Ignored build scripts` | pnpm 11 拦截了某个传递依赖的构建脚本。在 profile 目录（`~/.dsh/profiles/web`）跑 `pnpm approve-builds` 按提示放行——本插件自身已无构建脚本依赖。 |
 | 报 `minimum release age` / 版本不足 24h | 装的版本发布不足 24 小时。等 24h 或重跑一次（pnpm 会自动补 `minimumReleaseAgeExclude`）。 |
 | 报「找不到 profile 目录」 | 先跑一次 `dsh web`，让它初始化 `~/.dsh/profiles/web`。 |
+| 宿主启动即崩：`DesktopHostFatalError: … required plugins did not activate / better-sidebar` | profile 里自带了 `@deepseek-ai/dsh-*` 副本（旧 DSH 版本留下的，或被写进 profile 的 `package.json` / overrides），它们会抢在宿主安装之前被解析，本插件静态 import 的 `dsh-subagent` 因此绑到混搭版本；混版缺导出时宿主只报这条 fatal，看不到是哪个包缺了什么。先确认（新版插件随包提供）：`node ~/.dsh/profiles/web/node_modules/dsh-better-sidebar/scripts/check-profile-host-tree.mjs ~/.dsh/profiles/web`。修复：从 profile 的 `package.json` / overrides 移除 `@deepseek-ai/dsh-*` 后在该目录 `pnpm install`（让宿主安装提供），或把两份副本对齐到同一版本；然后重启。安装脚本会自动跑这条检查。 |
 | 页面出现**两个侧边栏** | 双挂载。删掉 `~/.dsh/profiles/web/cordis.patch.yml` 里旧的手动挂载行（`- insert: ... better-sidebar ...`）；聚合包以不同 id 挂载本包时会自动退让，无需处理。 |
 | 升级后设置页的值去哪了 | DSH 0.1.7 起偏好写在 profile 里本插件的挂载行上（默认 entry id `better-sidebar`），插件首次启动会把旧 `settings.yaml` 里的配置一次性回迁，不会覆盖新设的值。 |
 | 终端无法使用 | 终端由 **DSH 自身**提供（本插件不自带 PTY），请查 DSH 侧文档；底部终端显示「宿主未提供终端能力」= 这个部署没挂终端控制器。 |
-| 提示 `dsh: command not found` | 先安装 DSH；或用 `npx -y --package @deepseek-ai/dsh@0.2.1-rc.1 dsh plugin --profile web add @vimors/dsh-sidebar@1.0.0`。 |
-
-</details>
-
-<details>
-<summary><b>🪟 Windows + WSL2</b></summary>
+| 提示 `dsh: command not found` | 先安装 DSH；或用 `npx -y --package @deepseek-ai/dsh@0.2.2-rc.1 dsh plugin --profile web add @vimors/dsh-sidebar@1.2.0`。 |
 
 在 Windows 宿主上运行 DSH、直接打开**位于 WSL2 发行版内部**的项目：文件树、Git 状态、diff、预览与「打开方式」全部作用于发行版自己的文件。Git 有意**在发行版内部执行**（`wsl.exe -d <distro> --exec git -C <linuxPath>`）——走 9P 挂载的 Windows 版 git 会报出大量虚假修改：POSIX 权限位 `100755` 变 `100644`、符号链接失效、CRLF/LF 转换。
 
@@ -111,44 +108,27 @@ dsh plugin --profile web add @vimors/dsh-sidebar
 - 只支持 `\\wsl.localhost\`（以及旧的 `\\wsl$\`）UNC 根。
 - Git 按设计在发行版内部执行，因此只有 Windows 侧 git 的配置无法用于 WSL 目录。
 - POSIX 路径只有在真实文件系统根下（`/opt`、`/home`、`/tmp`、`/workspace` 等）才被当作 WSL 位置，其它绝对 Linux 路径保持原样。
-
 </details>
 
 ## 🆕 最近更新
 
-**v0.29.0 — 侧边对话接入 GenUI**
+**v0.31.1 — Markdown 的 `file://` 图片地址**
 
-- 新增可选的 `registerSidechatSurfaceAdapter` 服务，配合 GenUI 0.15.0 在已结算的侧边回复里渲染交互组件；状态和动作归属对应子线程。
-- 未安装消费插件、流式回复及不支持的围栏继续显示原 Markdown；保留 0.28.2 的冷会话读取修复。
-- 配套实现由 [@sunxiuguo](https://github.com/sunxiuguo) 贡献，见 [#1033](https://github.com/omdsh-dev/DSH-better-sidebar/pull/1033)。
+- **`file:///...` 图片现在能显示**：Markdown 语法和原始 HTML 的 `file:` 地址会先还原成绝对本地路径，再走与相对图片相同的会话媒体路由；支持 Windows 盘符、`localhost`、UNC 与百分号编码。
 
-**v0.28.2 — 大会话冷读修复**
+**v0.31.0 — Markdown/HTML 预览的本地图片与桌面壳修复**
 
-- **根因修复**：detached 会话的 cwd 不再解码整份会话日志——改读存储在 header 里的工作区地址（只读第一个 zstd 帧，header-only），按会话做进程内缓存与在飞去重；`activeWorktreeRootOf` 对 detached 会话不再折持久化日志
-- **为什么 0.28.1 没修好**：单飞只覆盖 `/sidebar/api`，而启动期真正并发的是 fs-watch 每个监视目录一帧、`/sidebar/file|html` 每资源一次——39 MB 级会话仍被并发整读数十次
-- **行为**：会话 attach 后仍跟随 `working_directory` 与 linked worktree；attach 之前侧边栏根是原始项目目录，下一次 5 s 轮询自动切回
-- **实测（40.2 MB 会话，本机）**：12 路由 + 36 个绕过入口并发 → 1 次 header 读、0 次整读、3 ms、RSS +0.3 MB；修复前 6 个入口并发即 6 次整读、峰值 +1.0 GB（外推 36 次 ≈ 6 GB）
+- **Markdown 预览的本地图片恢复正常**：桌面壳里相对/绝对路径不再因媒体 URL 跨站而只剩 alt；Markdown 语法的 `data:image` 也能显示（`data:text/html` 等仍拒绝）。
+- **桌面壳沙箱 HTML 预览不再空白**：文档与相对 CSS/JS/图片/字体由顶层可信帧取回并内联到 sandboxed Blob；iframe 仍未开放 `allow-same-origin`，浏览器与「关闭沙箱」路径不变。
+- **其他**：本版同时带上 0.30.1 之后已合入 dev 的任务、编辑器与侧边对话修复。
 
-**v0.28.1 — UX 与可靠性补丁**
+**v0.30.1 — 设置导航图标修复**
 
-- **OOM 修复**：12 条 `/sidebar/*` 路由共享的冷 cwd 读取按「会话 + 客户端提示」合并，切换会话的并发突发不再并行解码同一份大会话日志
-- **不再静默写错文件**：页签调解覆盖后台会话，worktree 会话统一地址基准——改名/删除的已打开文件不会被下一次保存重建，聊天链接也不会静默打开另一检出的同名文件
-- **宿主崩溃防护**：病态 `git status` 输出加了闩锁与进程树终止，「宿主 `RangeError` 崩溃」降为一次 SCM 刷新失败
-- **Git 页**：>1000 分支的历史恢复加载；tag 现在装饰提交行与详情，tag 变化会使旧分页失效
-- **编辑器**：仅 mtime 变化后保存不再死锁 `fs-conflict`；刷新后保留阅读位置；「添加到对话」落地为紧凑引用 chip，不再展平已有 chip
-- **Markdown 链接**：本地 destination 的 Windows 反斜杠归一，`C:\ws\_analysis\report.md` 不再报裸 ENOENT
-- **侧栏**：右栏展开时底部工作台入口常显；macOS 兜底入口避开红绿灯；页签 scope 按内容稳定，消除无谓的整文件重读；关闭侧聊页签时归档其会话
-
-**v0.28.0 — 面向 DSH 0.2.1-rc.1+ 的插件正式版**
-
-- 13 条 DSH peer 下限前移到 `^0.2.1-rc.1`，沿用 alpha.0 的功能实现，不增加运行时改动
-- 上游 alpha.5 → rc.1 完整树差异共 355 个文件，全部为 `package.json`，源码零变化
-- DSH 0.2.0-rc.2 宿主固定插件 v0.26.1；DSH 0.2.1-alpha.5 宿主固定 v0.28.0-alpha.0
-- 验证：[RC 适配记录](./docs/plans/2026-10-17-dsh-0.2.1-rc.1-adaptation.md)
+- **设置页「侧边卡片」那一行不再显示两个图标**：插件此前用 CSS 遮罩盖住宿主的兜底齿轮、再画自己的图标；宿主的导航图标外层多了容器，同时也提供了按 section 挂图标的口子。现在图标走宿主插槽，标记 + 遮罩那一套整体删除（顺带去掉了一个全局 DOM 观察器）。
 
 ## 🔌 插件生态
 
-`ctx.betterSidebar` 向所有插件开放 `registerTab` / `registerFileViewer` 两个扩展点，内置 6 tab + 4 viewer 与第三方插件走同一套 API。GitHub topic [`dsh-better-sidebar`](https://github.com/topics/dsh-better-sidebar) 下已有 **30+ 生态插件**；完整接入文档见 **[docs/external-plugin-guide.md](./docs/external-plugin-guide.md)**。
+`ctx.betterSidebar` 向所有插件开放 `registerTab` / `registerFileViewer` / `registerFileIcon` / `registerFileAction` / `registerTabAction` 五个扩展点，内置 6 tab + 5 viewer 与第三方插件走同一套 API。GitHub topic [`dsh-better-sidebar`](https://github.com/topics/dsh-better-sidebar) 下已有 **30+ 生态插件**；完整接入文档见 **[docs/external-plugin-guide.md](./docs/external-plugin-guide.md)**。
 
 ```ts
 import type {} from 'dsh-better-sidebar'  // 触发 ctx.betterSidebar 类型合并
@@ -239,7 +219,7 @@ export function apply(ctx: Context) {
 
 - 路由受 Host 头信任围栏保护（与 `/api` 一致）；`fs.write` 原子写入；git 只调 CLI、绝不设置身份
 - ⚠️ **v0.23.0 起文件系统路由不做工作区包含检查**：能读写宿主用户可访问的任意路径（只受 OS 权限约束）——调用方不能再把这些路由当作被围栏保护的接口
-- HTML 预览在**不透明源沙箱 iframe** 中渲染；设置页可按功能关闭沙箱（默认关闭，带警告文案）
+- HTML 预览在**不透明源沙箱 iframe** 中渲染，相对引用的 CSS、JavaScript、JSON、字体与 WebAssembly 均按内容类型返回；设置页可按功能关闭沙箱（默认关闭，带警告文案）
 - Git 无 push/pull/fetch；文件树只对**已展开**的目录做 watch；Markdown 预览渲染的是已保存文件
 - 只读预览的格式（表格 / PDF / 图片 / Office）由 DSH 内置文档预览渲染，实现随宿主版本走；浏览器视图只在 desktop profile 存在
 - 未保存草稿在关闭标签页 / 删除文件 / 刷新页面前都会先确认；磁盘被外部改动后再保存会被拒绝，不会静默覆盖
@@ -283,6 +263,8 @@ Windows / Linux / macOS 三平台适配，含 **Windows + WSL2** 工作区（见
 <a href="https://github.com/omdsh-dev/DSH-better-sidebar/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=omdsh-dev/DSH-better-sidebar" alt="贡献者" />
 </a>
+
+当前未发布批次的文字清单：[CONTRIBUTORS.md](./CONTRIBUTORS.md)。
 
 ## 🔗 友情链接
 

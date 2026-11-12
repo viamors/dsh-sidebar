@@ -61,7 +61,7 @@ function packedManifest(): Record<string, unknown> {
     // Never hand tar an absolute Windows path: Git Bash's GNU tar reads the
     // drive-letter colon as a remote-host spec ("Cannot connect to C:").
     // Run it from the pack dir with the bare tarball name instead.
-    execFileSync('tar', ['-xzf', `${pkg.name}-${pkg.version}.tgz`, 'package/package.json'], { cwd: dir, stdio: 'pipe' })
+    execFileSync('tar', ['-xzf', `${pkg.name.replace('@', '').replace('/', '-')}-${pkg.version}.tgz`, 'package/package.json'], { cwd: dir, stdio: 'pipe' })
     return JSON.parse(readFileSync(join(dir, 'package/package.json'), 'utf8')) as Record<string, unknown>
   } finally {
     removeTree(dir)
@@ -142,7 +142,7 @@ describe('DSH community-market manifest compatibility', () => {
     const dshPeers = Object.keys(peers).filter(name => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
     expect(dshPeers.length).toBeGreaterThan(10)
     for (const name of dshPeers) {
-      expect(peers[name], name).toMatch(/^\^0\.2\.1-rc\.1$/)
+      expect(peers[name], name).toMatch(/^\^0\.2\.2-rc\.1$/)
     }
   })
 })

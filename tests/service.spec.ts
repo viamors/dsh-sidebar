@@ -124,6 +124,21 @@ describe('enable switches (declarative settings)', () => {
     expect(tabs.filter(t => t.type === 'explorer')).toHaveLength(0)
   })
 
+  it('a hidden type is always enabled: the settings inventory offers no switch for it', () => {
+    const { store, service } = setup()
+    service.registerTab({ id: 'helper', title: 'Helper', hidden: true, component: () => null })
+    store.setPrefs({ ...store.getPrefs(), tabsEnabled: { helper: false } })
+    // A hidden type never reaches the side card grid (there is no sidebar
+    // presence to switch), so a stale `false` — written by an older build
+    // that did inventory hidden types — must not keep refusing its opens.
+    expect(service.isTabEnabled('helper')).toBe(true)
+    // The gate really is open: the programmatic open lands.
+    store.setSession('s1')
+    service.openTab({ type: 'helper', title: 'Helper' })
+    const tabs = allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+    expect(tabs.filter(tab => tab.type === 'helper')).toHaveLength(1)
+  })
+
   it('matchFileViewer skips a disabled viewer (files fall through)', () => {
     const { store, service } = setup()
     service.registerFileViewer({ id: 'code', exts: [], priority: -100, fetchStrategy: 'fsRead', component: () => null })

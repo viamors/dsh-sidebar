@@ -129,11 +129,18 @@ function makeConnection(initial: 'connected' | 'disconnected' | 'connecting') {
 type Connection = ReturnType<typeof makeConnection>
 
 /** The client context face SideChatView touches (everything inert but list). */
-function makeCtx(store: ReturnType<typeof makeStore>, connection?: Connection): Context {
+function makeCtx(
+  store: ReturnType<typeof makeStore>,
+  connection?: Connection,
+  betterSidebar: { updateTab: ReturnType<typeof vi.fn>; openTab: ReturnType<typeof vi.fn> } = {
+    updateTab: vi.fn(),
+    openTab: vi.fn(),
+  },
+): Context {
   return {
     sessions: { list: store },
     ...(connection !== undefined ? { connection } : {}),
-    get: (key: string) => (key === 'betterSidebar' ? { updateTab: vi.fn(), openTab: vi.fn() } : undefined),
+    get: (key: string) => (key === 'betterSidebar' ? betterSidebar : undefined),
   } as unknown as Context
 }
 
@@ -184,6 +191,70 @@ async function clickArchive(button: HTMLButtonElement): Promise<void> {
     await Promise.resolve()
     await Promise.resolve()
   })
+}
+
+/** jsdom ships no ResizeObserver; a visible Tooltip bubble measures itself
+ *  with one. The measurement result is irrelevant here — only the rendered
+ *  label is asserted. */
+function stubResizeObserver(): () => void {
+  const original = (globalThis as Record<string, unknown>).ResizeObserver
+  class Fake {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  ;(globalThis as Record<string, unknown>).ResizeObserver = Fake
+  return () => {
+    if (original === undefined) delete (globalThis as Record<string, unknown>).ResizeObserver
+    else (globalThis as Record<string, unknown>).ResizeObserver = original
+  }
+}
+
+/** jsdom ships no `matchMedia`, and the 0.2.2 host Tooltip gates its hover
+ *  handler on a hover-capable pointer (`(any-hover: hover)`), so the spec has
+ *  to declare one before any bubble can open. */
+function stubHoverCapable(): () => void {
+  const original = Object.getOwnPropertyDescriptor(window, 'matchMedia')
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: (query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  })
+  return () => {
+    if (original === undefined) Reflect.deleteProperty(window, 'matchMedia')
+    else Object.defineProperty(window, 'matchMedia', original)
+  }
+}
+
+/** Open a composer-bar control's hover bubble and return its text. */
+async function tooltipOf(control: HTMLElement): Promise<string> {
+  const restoreObserver = stubResizeObserver()
+  const restoreHover = stubHoverCapable()
+  try {
+    const anchor = control.parentElement
+    if (anchor === null) throw new Error('the control is missing its hover anchor')
+    await act(async () => {
+      // DSH 0.2.2's Tooltip opens on POINTER enter (React derives
+      // `onPointerEnter` from a bubbling `pointerover`) and rejects touch;
+      // 0.2.1's listened to mouse enter, which is why this used to dispatch
+      // `mouseover` and now opens nothing at all.
+      anchor.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))
+      // ComposerTip's 120 ms hover delay (TIP_DELAY_MS).
+      await new Promise(resolve => setTimeout(resolve, 180))
+    })
+    return document.body.querySelector('[role="tooltip"]')?.textContent ?? ''
+  } finally {
+    restoreHover()
+    restoreObserver()
+  }
 }
 
 function jsonResponse(value: unknown): Response {
@@ -286,7 +357,7 @@ beforeEach(() => {
         } as unknown as Response
       }
       if (promptHold !== null) await promptHold
-      return jsonResponse({ ok: true, value: { accepted: true } })
+      return jsonResponse({ ok: true, value: { accepted: true, messageId: 'm9' } })
     }
     return jsonResponse({ ok: true, value: {} })
   })
@@ -339,6 +410,49 @@ describe('SideChatView rendering', () => {
     unmount()
   })
 
+  it.each([
+    // destination · the file button's title · the absolute path openTab takes · line
+    ['src/Foo.java:37-58', 'src/Foo.java', '/p/src/Foo.java', 37],
+    ['E:/Code/project/Foo.java:37', 'E:/Code/project/Foo.java', 'E:\\Code\\project\\Foo.java', 37],
+    ['E:/Code/my project/目录/Foo(1).java:12:5', 'E:/Code/my project/目录/Foo(1).java', 'E:\\Code\\my project\\目录\\Foo(1).java', 12],
+    ['src/main.ts#L8-L15', 'src/main.ts', '/p/src/main.ts', 8],
+  ])('renders and opens a source link to %s at its first referenced line', async (destination, title, path, line) => {
+    eventsValue = EVENTS.map(event => event.type === 'assistant/message'
+      ? {
+        ...event,
+        data: {
+          ...event.data,
+          message: {
+            ...event.data.message,
+            content: [{ type: 'text', text: `See [source](<${destination}>)` }],
+          },
+        },
+      }
+      : event)
+    const host = { updateTab: vi.fn(), openTab: vi.fn() }
+    const { container, unmount } = renderRoot(createElement(SideChatView,
+      viewProps(makeCtx(threadStore(), undefined, host)),
+    ))
+    try {
+      await act(async () => {})
+      // DSH 0.2.2's MarkdownText parses the line location ITSELF — both the
+      // GitHub fragment (`#L8-L15`) and the `:37` / `:12:5` suffixes — and
+      // titles the file button with the PATH it parsed, so the location is no
+      // longer part of the destination the plugin sees (0.2.1 carried it
+      // verbatim, which is what `path-line.ts` still splits for native tab
+      // addresses). The titled button with the link glyph is the host's own
+      // file-link shape; the click below is the contract we own.
+      const link = container.querySelector<HTMLButtonElement>(`button[title="${title}"]`)
+      expect(link).not.toBeNull()
+      expect(link?.querySelector('svg')).not.toBeNull()
+      expect(container.textContent).not.toContain(`(<${destination}`)
+      act(() => { link?.click() })
+      expect(host.openTab).toHaveBeenCalledWith(expect.objectContaining({ path, line }))
+    } finally {
+      unmount()
+    }
+  })
+
   it('shows the disconnect banner, reconnects on click, and pulls immediately on recovery', async () => {
     const connection = makeConnection('disconnected')
     const props = viewProps(makeCtx(threadStore(), connection))
@@ -372,12 +486,42 @@ describe('SideChatView rendering', () => {
 })
 
 describe('SideChatView archive', () => {
-  it('archives the bound thread with stopActivity and rebinds the tab to the newest remaining thread', async () => {
+  /** A bound session the host's own session list CAN show (no subagent
+   *  origin): the only case in which the archive action stays enabled, so the
+   *  handler's archive-and-rebind contract is pinned on it. */
+  const recoverableStore = (running = false) => makeStore({
+    byId: {
+      root: { id: 'root', displayTitle: '主会话', running: false },
+      t1: { id: 't1', displayTitle: '线程一', running },
+    },
+  })
+
+  it('disables archiving a side thread and explains that the host can never show it again', async () => {
+    const host = makeArchiveHost()
+    const props = viewProps(makeArchiveCtx(threadStore(), host))
+    const { container, unmount } = renderRoot(createElement(SideChatView, props))
+    await act(async () => {})  // flush the initial transcript pull
+
+    // Every thread this view binds is `origin: 'subagent'`, and the host's
+    // session list hides those rows in ALL archive filters (its
+    // sessionVisible() returns false BEFORE the filter runs), so archiving one
+    // is a one-way door: no list entry can ever offer "unarchive".
+    const button = archiveButton(container)
+    expect(button.disabled).toBe(true)
+    expect(await tooltipOf(button)).toContain('归档后无法找回')
+    // A disabled control swallows the click: no request, no rebind.
+    await clickArchive(button)
+    expect(host.archiveSession).not.toHaveBeenCalled()
+    expect(host.betterSidebar.updateTab).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('archives a recoverable bound session with stopActivity and rebinds to the newest remaining thread', async () => {
     const host = makeArchiveHost()
     const store = makeStore({
       byId: {
         root: { id: 'root', displayTitle: '主会话', running: false },
-        t1: { id: 't1', displayTitle: 'Side: 线程一', origin: 'subagent', parentId: 'root', running: false },
+        t1: { id: 't1', displayTitle: '线程一', running: false },
         t2: { id: 't2', displayTitle: 'Side: 线程二', origin: 'subagent', parentId: 'root', running: false },
       },
       // The host's own catalog carries the creation order the fallback ranks by.
@@ -385,7 +529,6 @@ describe('SideChatView archive', () => {
         root: {
           values: {
             subagentCatalog: [
-              { id: 't1', createdAt: 1_000, mode: 'continuable', label: 'Side: 线程一' },
               { id: 't2', createdAt: 2_000, mode: 'continuable', label: 'Side: 线程二' },
             ],
           },
@@ -403,7 +546,7 @@ describe('SideChatView archive', () => {
     // The host's own archive capability, once, with a running agent settled.
     expect(host.archiveSession).toHaveBeenCalledTimes(1)
     expect(host.archiveSession).toHaveBeenCalledWith('t1', { stopActivity: true })
-    // The tab moves to the newest remaining thread (t2 outranks t1 in the catalog).
+    // The tab moves to the newest remaining thread.
     expect(host.betterSidebar.updateTab).toHaveBeenCalledTimes(1)
     expect(host.betterSidebar.updateTab).toHaveBeenCalledWith('tab1', { meta: { threadId: 't2' } })
     unmount()
@@ -411,13 +554,7 @@ describe('SideChatView archive', () => {
 
   it('disables the archive button while the thread runs and archives nothing on click', async () => {
     const host = makeArchiveHost()
-    const store = makeStore({
-      byId: {
-        root: { id: 'root', displayTitle: '主会话', running: false },
-        t1: { id: 't1', displayTitle: 'Side: 线程一', origin: 'subagent', parentId: 'root', running: true },
-      },
-    })
-    const props = viewProps(makeArchiveCtx(store, host))
+    const props = viewProps(makeArchiveCtx(recoverableStore(true), host))
     const { container, unmount } = renderRoot(createElement(SideChatView, props))
     await act(async () => {})  // flush the initial transcript pull
 
@@ -432,8 +569,7 @@ describe('SideChatView archive', () => {
 
   it('unbinds the tab to the empty state once no thread is left to switch to', async () => {
     const host = makeArchiveHost()
-    const store = threadStore()  // the bound thread t1 is the only one under 'root'
-    const props = viewProps(makeArchiveCtx(store, host))
+    const props = viewProps(makeArchiveCtx(recoverableStore(), host))
     const { container, unmount } = renderRoot(createElement(SideChatView, props))
     await act(async () => {})  // flush the initial transcript pull
 

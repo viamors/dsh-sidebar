@@ -338,6 +338,25 @@ function typeAndCommit(input: HTMLInputElement, value: string): void {
   })
 }
 
+/** Register a viewer that reports an unsaved draft on mount; its report
+ *  feeds the editor-dirty registry the switch/close guards read. */
+function registerDirtyViewer(service: ReturnType<typeof createBetterSidebarService>): void {
+  const DirtyViewer = (viewerProps: FileViewerProps): ReactNode => {
+    useEffect(() => {
+      viewerProps.onToolbarState?.({ modes: true, mode: 'edit', dirty: true, editable: true, saveState: 'idle' })
+      // Mount-only: this instance's draft is the report above.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+    return null
+  }
+  service.registerFileViewer({
+    id: 'test:dirty',
+    exts: ['fake'],
+    fetchStrategy: 'none',
+    component: DirtyViewer,
+  })
+}
+
 describe('EditorHost (files window)', () => {
   it('a path-less tab renders the empty-state hint with the tree panel open', () => {
     const { store, ctx, homeTab } = setup()
@@ -404,6 +423,121 @@ describe('EditorHost (files window)', () => {
       // No new tab landed.
       expect(allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)).toHaveLength(1)
     } finally {
+      unmount()
+    }
+  })
+
+  it('in-place mode: switching files confirms before dropping an unsaved draft', () => {
+    const { store, ctx } = setup()
+    const service = ctx.betterSidebar
+    registerDirtyViewer(service)
+    const tabId = 'editor:/tmp/a.fake'
+    service.openTab({ type: 'editor', title: 'a.fake', path: '/tmp/a.fake', id: tabId })
+    const fileTab = (): SidebarTab =>
+      allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+        .find(tab => tab.id === tabId)!
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: true })
+    const { container, unmount } = mountHost(ctx, store, fileTab)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    try {
+      const input = container.querySelector('input')!
+      typeAndCommit(input, '/tmp/b.fake')
+      // Cancelled: the tab keeps its file (and the mounted draft).
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(fileTab().path).toBe('/tmp/a.fake')
+      // Confirmed: the same gesture switches in place.
+      confirm.mockReturnValue(true)
+      typeAndCommit(input, '/tmp/b.fake')
+      expect(confirm).toHaveBeenCalledTimes(2)
+      expect(fileTab().path).toBe('/tmp/b.fake')
+      expect(fileTab().title).toBe('b.fake')
+    } finally {
+      confirm.mockRestore()
+      unmount()
+    }
+  })
+
+  it('in-place mode: re-opening the same path never asks to discard the draft', () => {
+    const { store, ctx } = setup()
+    registerDirtyViewer(ctx.betterSidebar)
+    const tabId = 'editor:/tmp/a.fake'
+    ctx.betterSidebar.openTab({ type: 'editor', title: 'a.fake', path: '/tmp/a.fake', id: tabId })
+    const fileTab = (): SidebarTab =>
+      allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+        .find(tab => tab.id === tabId)!
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: true })
+    const { container, unmount } = mountHost(ctx, store, fileTab)
+    const confirm = vi.spyOn(window, 'confirm')
+    try {
+      typeAndCommit(container.querySelector('input')!, '/tmp/a.fake')
+      // The same path is not a switch: no prompt, same tab, same file.
+      expect(confirm).not.toHaveBeenCalled()
+      expect(fileTab().id).toBe(tabId)
+      expect(fileTab().path).toBe('/tmp/a.fake')
+    } finally {
+      confirm.mockRestore()
+      unmount()
+    }
+  })
+
+  it('in-place mode: a file another native type claims never asks about the draft', () => {
+    const { store, ctx } = setup()
+    const service = ctx.betterSidebar
+    registerDirtyViewer(service)
+    const resources: string[] = []
+    const claimedCtx = {
+      betterSidebar: service,
+      get: (name: string) => {
+        if (name === 'betterSidebar') return service
+        if (name === 'sidebarRightTabs') {
+          return { candidates: (address: string) => address.endsWith('.drawio') ? [{ kind: 'drawio' }] : [{ kind: 'editor' }] }
+        }
+        if (name === 'sidebarRight') {
+          return { openResource: (address: string) => { resources.push(address) } }
+        }
+        return undefined
+      },
+      sessions: ctx.sessions,
+    } as unknown as Context
+    service.openTab({ type: 'editor', title: 'a.fake', path: '/tmp/a.fake', id: 'editor:/tmp/a.fake', meta: { treeOpen: false } })
+    const fileTab = (): SidebarTab =>
+      allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+        .find(tab => tab.path === '/tmp/a.fake')!
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: true })
+    const { container, unmount } = mountHost(claimedCtx, store, fileTab)
+    const confirm = vi.spyOn(window, 'confirm')
+    try {
+      typeAndCommit(container.querySelector('input[placeholder^="File path"]')!, '/tmp/board.drawio')
+      // The claiming type opens the file elsewhere; this tab keeps its draft,
+      // so there is nothing to confirm.
+      expect(confirm).not.toHaveBeenCalled()
+      expect(resources).toHaveLength(1)
+      expect(fileTab().path).toBe('/tmp/a.fake')
+    } finally {
+      confirm.mockRestore()
+      unmount()
+    }
+  })
+
+  it('split mode: opening another file never asks about the source draft', () => {
+    const { store, ctx } = setup()
+    registerDirtyViewer(ctx.betterSidebar)
+    ctx.betterSidebar.openTab({ type: 'editor', title: 'a.fake', path: '/tmp/a.fake', id: 'editor:/tmp/a.fake' })
+    const fileTab = (): SidebarTab =>
+      allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+        .find(tab => tab.path === '/tmp/a.fake')!
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: false })
+    const { container, unmount } = mountHost(ctx, store, fileTab)
+    const confirm = vi.spyOn(window, 'confirm')
+    try {
+      typeAndCommit(container.querySelector('input[placeholder^="File path"]')!, '/tmp/b.fake')
+      const tabs = allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+      // Split mode opens a per-path tab; the source tab and its draft stay put.
+      expect(confirm).not.toHaveBeenCalled()
+      expect(fileTab().path).toBe('/tmp/a.fake')
+      expect(tabs.some(tab => tab.path === '/tmp/b.fake')).toBe(true)
+    } finally {
+      confirm.mockRestore()
       unmount()
     }
   })
@@ -661,6 +795,76 @@ describe('EditorHost (files window)', () => {
       expect(seen?.largeFile).toEqual({ size })
       expect(seen?.size).toBe(size)
       expect(seen?.content, 'the document is not handed over').toBeUndefined()
+    } finally {
+      unmount()
+    }
+  })
+
+  it('a directory opened as a file falls back to the folder window (#1029)', async () => {
+    const { store, ctx } = setup()
+    const service = ctx.betterSidebar
+    // The chat file-link route and the native sidebar_open route can hand the
+    // editor a DIRECTORY path with no meta.dir (issue #1029). The host answers
+    // the fs.read with its dedicated directory code; the tab must promote
+    // itself to the folder window instead of rendering the raw host error.
+    // The source path is RELATIVE on purpose: that is the spelling a chat link
+    // carries. A promotion that roots the tree at that relative path lists the
+    // level under the host-resolved ABSOLUTE key, so the root would sit on its
+    // loading placeholder forever — the promotion must absolutize first.
+    service.registerFileViewer({ id: 'test:dir-read', exts: [], fetchStrategy: 'fsRead', component: () => null })
+    fsRead.mockRejectedValueOnce({ code: 'fs-directory', message: '"/tmp/src" is a directory' })
+    service.openTab({ type: 'editor', title: 'src', path: 'src', id: 'editor:src' })
+    const tab = (): SidebarTab =>
+      allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+        .find(candidate => candidate.id === 'editor:src')!
+    const { container, rerender, unmount } = mountHost(ctx, store, tab)
+    try {
+      await act(async () => {
+        await new Promise<void>(resolve => { setTimeout(resolve, 0) })
+      })
+      expect(fsRead).toHaveBeenCalledWith(expect.anything(), 'src')
+      // The fallback persisted the folder flag exactly like a sidebar_open
+      // folder seed would have, and resolved the relative path against the
+      // session cwd (`/tmp` in setup()) before rooting the tree.
+      expect(tab().path).toBe('/tmp/src')
+      expect(tab().meta).toEqual({ dir: true })
+      rerender()
+      expect(container.querySelector('input[placeholder^="Search files"]')).not.toBeNull()
+      expect(container.textContent).not.toContain('is a directory')
+    } finally {
+      unmount()
+    }
+  })
+
+  it('a Windows session root normalizes the promoted folder root to backslashes (#1029)', async () => {
+    const { store, ctx } = setup()
+    const service = ctx.betterSidebar
+    // A chat file address carries a `/`-separated session-relative path. Joined
+    // onto a Windows cwd it must not keep the mixed spelling: the host keys
+    // every listing by its `path.resolve`'d absolute path while FileTree keys
+    // levels by the requested root, so mixed separators would leave the root on
+    // its "Loading…" placeholder forever.
+    const snapshot = (ctx.sessions as unknown as {
+      list: { getSnapshot: () => { byId: Record<string, { cwd: string }> } }
+    }).list.getSnapshot()
+    snapshot.byId[sessionId]!.cwd = 'C:\\work'
+    service.registerFileViewer({ id: 'test:dir-read-win', exts: [], fetchStrategy: 'fsRead', component: () => null })
+    fsRead.mockRejectedValueOnce({ code: 'fs-directory', message: '"C:\\work\\src" is a directory' })
+    service.openTab({ type: 'editor', title: 'src', path: 'src', id: 'editor:win-src' })
+    const tab = (): SidebarTab =>
+      allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+        .find(candidate => candidate.id === 'editor:win-src')!
+    const { container, rerender, unmount } = mountHost(ctx, store, tab)
+    try {
+      await act(async () => {
+        await new Promise<void>(resolve => { setTimeout(resolve, 0) })
+      })
+      expect(fsRead).toHaveBeenCalledWith(expect.anything(), 'src')
+      expect(tab().path).toBe('C:\\work\\src')
+      expect(tab().meta).toEqual({ dir: true })
+      rerender()
+      expect(container.querySelector('input[placeholder^="Search files"]')).not.toBeNull()
+      expect(container.textContent).not.toContain('is a directory')
     } finally {
       unmount()
     }

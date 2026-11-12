@@ -33,7 +33,7 @@ const FIXTURE_IDENTITY = {
 
 /** Run one git command (throws on a non-zero exit). */
 function gitRun(cwd: string, args: string[]): string {
-  const result = spawnSync('git', ['-C', cwd, '--no-pager', '-c', 'color.ui=false', ...args], {
+  const result = spawnSync('git', ['-C', cwd, '--no-pager', '-c', 'color.ui=false', '-c', 'safe.bareRepository=all', ...args], {
     encoding: 'utf8',
     env: { ...process.env, ...FIXTURE_IDENTITY },
   })

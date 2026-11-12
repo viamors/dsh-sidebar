@@ -19,6 +19,7 @@ import { createSidebarStore } from '../src/client/state.ts'
 import { api, type GitStatusEntry, type GitStatusResult, type GitWorktree } from '../src/client/api.ts'
 import type { BetterSidebarService } from '../src/client/service.ts'
 import { t } from '../src/client/locales.ts'
+import { SUBMENU_FLIP_ATTR } from '../src/client/menu-flip.ts'
 import type { Context } from '../src/context-types.ts'
 
 import { setupReactAct } from './test-utils.ts'
@@ -116,36 +117,26 @@ function menuItem(label: string): HTMLButtonElement {
   return item
 }
 
-/** Every row of the portalled More Actions menu: pull / push, then the child
- *  checkouts, then the linked worktrees — all FLAT rows of ONE card. */
-function moreRows(): HTMLButtonElement[] {
-  return [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button[role="menuitem"]')]
-}
-
-function openMoreMenu(container: HTMLElement): HTMLButtonElement[] {
+function openMoreSubmenu(container: HTMLElement, label: string): HTMLButtonElement[] {
   const trigger = container.querySelector<HTMLButtonElement>(`button[aria-label="${t('gitMoreActions')}"]`)
   if (trigger === null) throw new Error('More Actions button not found')
   act(() => { trigger.click() })
-  // Flat rows only: a nested `submenu` card opens to the RIGHT — off-screen
-  // from a panel pinned to the window's right edge, where the row looked dead
-  // — and it also costs the card its viewport-fit scroll, so a 50-checkout
-  // container ran off the bottom of the screen. This is the regression guard.
-  expect(document.querySelector('[role="menu"] [aria-haspopup="menu"]')).toBeNull()
-  return moreRows()
+  const parent = menuItem(label)
+  expect(parent.getAttribute('aria-haspopup')).toBe('menu')
+  act(() => { parent.click() })
+  return [...document.querySelectorAll<HTMLButtonElement>('[role="menu"] [role="menu"] button[role="menuitem"]')]
 }
 
-async function chooseMoreOption(container: HTMLElement, label: string): Promise<void> {
-  const item = openMoreMenu(container).find(button => button.textContent?.trim() === label)
-  if (item === undefined) throw new Error(`menu option not found: ${label}`)
+async function chooseMoreOption(container: HTMLElement, submenu: string, label: string): Promise<void> {
+  const item = openMoreSubmenu(container, submenu).find(button => button.textContent?.trim() === label)
+  if (item === undefined) throw new Error(`submenu option not found: ${label}`)
   await act(async () => { item.click() })
   await flushEffects()
 }
 
 function branchButton(container: HTMLElement): HTMLButtonElement {
-  // The toolbar's repo chip is also a menu trigger, so target the branch one by
-  // its own hook rather than "the first aria-haspopup in the toolbar".
-  const button = container.querySelector<HTMLButtonElement>('[data-git-toolbar] [data-git-branch]')
-  if (button === null) throw new Error('toolbar branch button not found')
+  const button = container.querySelector<HTMLButtonElement>('[data-git-footer] button[aria-haspopup="menu"]')
+  if (button === null) throw new Error('footer branch button not found')
   return button
 }
 
@@ -168,15 +159,9 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       mountGit(root)
       await flushEffects()
 
-      // The Graph starts folded; unfold it so its content, branch filter and
-      // fetch accounting participate in the assertions below.
-      const graphDisclosure = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
-      await act(async () => { graphDisclosure.click() })
-      await flushEffects()
-
       // A clean primary + exactly one dirty linked checkout auto-selects the
       // linked checkout and loads every target-derived surface from it.
-      expect(branchButton(container).textContent).toContain('agent*')
+      expect(branchButton(container).textContent).toBe('agent*')
       expect(container.textContent).toContain('agent-change.ts')
       expect(container.textContent).toContain('Agent checkout commit')
       expect(container.textContent).not.toContain('Main checkout commit')
@@ -185,14 +170,12 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       // The repo / worktree pickers moved into More Actions (#944); the only
       // select left is the Graph section's own branch filter.
       expect([...container.querySelectorAll('select')]).toHaveLength(1)
-      // The worktree rows are flat rows of that one menu, under a heading row.
-      const worktreeRows = openMoreMenu(container)
-        .filter(button => (button.textContent ?? '').includes(' · '))
-      expect(worktreeRows.map(button => button.textContent)).toEqual(['main · main (0)', 'agent · agent (1)'])
-      await act(async () => { worktreeRows[0]!.click() })
+      const options = openMoreSubmenu(container, t('worktree'))
+      expect(options.map(button => button.textContent)).toEqual(['main · main (0)', 'agent · agent (1)'])
+      await act(async () => { options[0]!.click() })
       await flushEffects()
 
-      expect(branchButton(container).textContent).toContain('main*')
+      expect(branchButton(container).textContent).toBe('main*')
       expect(container.textContent).toContain('main-change.ts')
       expect(container.textContent).toContain('Main checkout commit')
       expect(container.textContent).not.toContain('Agent checkout commit')
@@ -230,16 +213,12 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       mountGit(root)
       await flushEffects()
 
-      // The Graph starts folded; unfold it so its rows (and Load more) mount.
-      const graphDisclosure = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
-      await act(async () => { graphDisclosure.click() })
-
       const loadMore = [...container.querySelectorAll<HTMLButtonElement>('[data-scm-section="graph"] button')]
         .find(button => button.textContent === t('graphLoadMore'))
       expect(loadMore).not.toBeUndefined()
       await act(async () => { loadMore!.click() })
 
-      await chooseMoreOption(container, 'main · main (0)')
+      await chooseMoreOption(container, t('worktree'), 'main · main (0)')
       expect(container.textContent).toContain('Main checkout commit 0')
 
       lateAgentPage.resolve(graphFor(AGENT, 99))
@@ -265,12 +244,8 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
     ))
     const status = vi.spyOn(api, 'gitStatus').mockImplementation(async (scope) => (
       // Attached sessions ignore the client's cwd override; repoRoot selects the child.
-      // `repositories` is the whole discovery of the session cwd, whichever child
-      // is selected (`status()` in src/git.ts reports `repoRoots(cwd)`, not the
-      // selected root alone), so the picker keeps offering both rows after a
-      // switch.
       scope.repoRoot === REPO_B
-        ? { isRepo: true, branch: 'b-main', entries: [{ path: 'b-change.ts', xy: ' M' }], root: REPO_B, repositories: [REPO_A, REPO_B] }
+        ? { isRepo: true, branch: 'b-main', entries: [{ path: 'b-change.ts', xy: ' M' }], root: REPO_B, repositories: [REPO_B] }
         : { isRepo: true, branch: 'a-main', entries: [{ path: 'a-change.ts', xy: ' M' }], root: REPO_A, repositories: [REPO_A, REPO_B] }
     ))
     const branch = vi.spyOn(api, 'gitBranch').mockImplementation(async (scope) => (
@@ -285,10 +260,8 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       mountGit(root, { scope: { sessionId: 'session', cwd: WS } })
       await flushEffects()
 
-      // The workspace container's child repositories retain their basename
-      // labels, as flat rows of the same menu.
-      const repoOptions = openMoreMenu(container)
-        .filter(button => ['a', 'b'].includes(button.textContent?.trim() ?? ''))
+      // The workspace container's child repositories retain their basename labels.
+      const repoOptions = openMoreSubmenu(container, t('gitRepository'))
       expect(repoOptions.map(button => button.textContent)).toEqual(['a', 'b'])
       const listingsBefore = worktrees.mock.calls.length
 
@@ -309,57 +282,14 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       // Explicit repo selection keeps that repo's PRIMARY checkout, even with
       // one dirty linked checkout available; every derived call targets it.
       expect(branch).toHaveBeenLastCalledWith(expect.objectContaining({ repoRoot: REPO_B }), REPO_B)
-      expect(openMoreMenu(container)
-        .filter(button => (button.textContent ?? '').includes(' · '))
-        .map(button => button.textContent))
+      expect(openMoreSubmenu(container, t('worktree')).map(button => button.textContent))
         .toEqual(['b-main · b (0)', 'b-agent · b-agent (2)'])
       act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
 
-      await chooseMoreOption(container, 'a')
+      await chooseMoreOption(container, t('gitRepository'), 'a')
       expect(branchButton(container).title).toBe(`${t('branch')}: a-main*`)
       expect(container.querySelector('[data-path="a-change.ts"]')).not.toBeNull()
       expect(container.querySelector('[data-path="b-change.ts"]')).toBeNull()
-    } finally {
-      act(() => { root.unmount() })
-      container.remove()
-    }
-  })
-
-  it('offers every child checkout as a flat row that really switches (#944 regression)', async () => {
-    // A monorepo container with more checkouts than fit on a screen: the rows
-    // used to live in a `submenu` card, which the host opens to the RIGHT —
-    // off-screen from a panel pinned to the window's right edge, so clicking
-    // "repository" did nothing at all and the list could not be scrolled.
-    const WS = 'C:/ws'
-    const REPOS = Array.from({ length: 60 }, (_, index) => `${WS}/r${String(index).padStart(2, '0')}`)
-    const status = vi.spyOn(api, 'gitStatus').mockImplementation(async (scope) => ({
-      isRepo: true,
-      branch: 'main',
-      entries: [],
-      root: scope.repoRoot ?? REPOS[0]!,
-      repositories: REPOS,
-    }))
-    vi.spyOn(api, 'gitWorktrees').mockResolvedValue([])
-    vi.spyOn(api, 'gitBranch').mockResolvedValue({ current: 'main', names: ['main'] })
-    vi.spyOn(api, 'gitGraph').mockResolvedValue(graphFor(undefined))
-
-    const container = document.createElement('div')
-    document.body.append(container)
-    const root: Root = createRoot(container)
-    try {
-      mountGit(root, { scope: { sessionId: 'session', cwd: WS } })
-      await flushEffects()
-
-      const repoRows = openMoreMenu(container)
-        .filter(button => /^r\d\d$/.test(button.textContent?.trim() ?? ''))
-      expect(repoRows).toHaveLength(REPOS.length)
-      expect(repoRows.every(button => !button.disabled)).toBe(true)
-
-      await act(async () => { repoRows.at(-1)!.click() })
-      await flushEffects()
-
-      expect(status.mock.calls.at(-1)![0]).toMatchObject({ sessionId: 'session', cwd: WS, repoRoot: REPOS.at(-1) })
-      expect(branchButton(container).title).toBe(`${t('branch')}: main`)
     } finally {
       act(() => { root.unmount() })
       container.remove()
@@ -388,17 +318,17 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
     try {
       mountGit(root)
       await flushEffects()
-      expect(branchButton(container).textContent).toContain('agent*')
+      expect(branchButton(container).textContent).toBe('agent*')
 
       // A later inventory pass prefers the brand-new dirty checkout; the user
       // never chose a checkout, but the ONE automatic pass already ran.
-      const refresh = container.querySelector<HTMLButtonElement>(`[data-git-toolbar] button[aria-label="${t('refresh')}"]`)
+      const refresh = container.querySelector<HTMLButtonElement>(`[data-scm-section="changes"] button[aria-label="${t('refresh')}"]`)
       expect(refresh).not.toBeNull()
       await act(async () => { refresh!.click() })
       await flushEffects()
       expect(worktrees).toHaveBeenCalledTimes(2)
 
-      expect(branchButton(container).textContent).toContain('agent*')
+      expect(branchButton(container).textContent).toBe('agent*')
       expect(container.textContent).toContain('agent-change.ts')
       expect(container.textContent).not.toContain('agent-2-change.ts')
     } finally {
@@ -429,7 +359,7 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
 
       // Changes refresh lands while the mount's inventory pass is in flight.
       // Shared status already knows this is a repo, so the action is available.
-      const refresh = container.querySelector<HTMLButtonElement>(`[data-git-toolbar] button[aria-label="${t('refresh')}"]`)
+      const refresh = container.querySelector<HTMLButtonElement>(`[data-scm-section="changes"] button[aria-label="${t('refresh')}"]`)
       expect(refresh).not.toBeNull()
       expect(refresh!.disabled).toBe(false)
       await act(async () => { refresh!.click() })
@@ -471,11 +401,6 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
 
       // Bringing the tab on screen loads the lens through one pass.
       mountGit(root, { visible: true })
-      await flushEffects()
-      // The Graph starts folded; unfold it so its content mounts for the
-      // catch-up assertion below.
-      const graphDisclosure = container.querySelector<HTMLButtonElement>('[data-scm-section="graph"] button[aria-expanded]')!
-      await act(async () => { graphDisclosure.click() })
       await flushEffects()
       expect(worktrees).toHaveBeenCalledTimes(1)
       expect(status).toHaveBeenCalled()
@@ -545,9 +470,9 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       mountGit(root)
       await flushEffects()
 
-      // The entire toolbar branch chip opens a menu of PLAIN branch names;
+      // The entire footer branch button opens a menu of PLAIN branch names;
       // the dirty marker belongs only to the footer label, never its options.
-      expect(branchButton(container).textContent).toContain('main*')
+      expect(branchButton(container).textContent).toBe('main*')
       act(() => { branchButton(container).click() })
       expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['main', 'feature'])
       await act(async () => { menuItem('feature').click() })
@@ -560,8 +485,53 @@ describe('GitLens (changes tab, git lens) linked-worktree consistency', () => {
       expect(input).not.toBeNull()
       // Branch/history failures are view-level, not the shared action channel.
       expect(banner!.parentElement).toBe(container.querySelector('[data-git-scroll]'))
-      expect(container.querySelector('[data-git-toolbar] [role="alert"]')).toBeNull()
+      expect(container.querySelector('[data-git-footer] [role="alert"]')).toBeNull()
       expect(banner!.compareDocumentPosition(input!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    } finally {
+      act(() => { root.unmount() })
+      container.remove()
+    }
+  })
+})
+
+/**
+ * Issue #988: the More Actions menu's repo/worktree rows open nested
+ * submenus. The button-anchored menu used to skip the body attribute the
+ * file-tree row menu publishes (menu-flip.ts), so layout.css never had the
+ * tokens it needs to flip those submenus back inside the viewport — in a
+ * right-docked sidebar they opened past the right edge and were unreachable.
+ */
+describe('GitLens (changes tab, git lens) More Actions submenu flip (#988)', () => {
+  it('publishes the flip geometry while the menu is open and clears it on close', async () => {
+    vi.spyOn(api, 'gitWorktrees').mockResolvedValue(inventories)
+    vi.spyOn(api, 'gitStatus').mockImplementation(async (_scope, target) => statusFor(target))
+    vi.spyOn(api, 'gitBranch').mockImplementation(async (_scope, target) => ({
+      current: target === AGENT ? 'agent' : 'main',
+      names: target === AGENT ? ['agent'] : ['main'],
+    }))
+    vi.spyOn(api, 'gitGraph').mockResolvedValue(graphFor(AGENT))
+
+    const { container, root } = makeRoot()
+    try {
+      mountGit(root)
+      await flushEffects()
+      // The attribute's lifetime IS the mechanism's scope: closed menu, no
+      // attribute (layout.css must not touch host-owned menus).
+      expect(document.body.hasAttribute(SUBMENU_FLIP_ATTR)).toBe(false)
+
+      // The trigger of a right-docked sidebar, above the viewport's midpoint.
+      // Those coordinates have to produce BOTH flips: left (no right-hand room
+      // for card + submenu) and down (more room below the top-edge row menu).
+      const trigger = container.querySelector<HTMLButtonElement>(`button[aria-label="${t('gitMoreActions')}"]`)
+      if (trigger === null) throw new Error('More Actions button not found')
+      vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(new DOMRect(976, 100, 24, 24))
+
+      expect(openMoreSubmenu(container, t('worktree')).length).toBeGreaterThan(0)
+      expect(document.body.getAttribute(SUBMENU_FLIP_ATTR)).toBe('down left')
+
+      // Closing the menu drops the tokens: the next menu gets its own geometry.
+      act(() => { trigger.click() })
+      expect(document.body.hasAttribute(SUBMENU_FLIP_ATTR)).toBe(false)
     } finally {
       act(() => { root.unmount() })
       container.remove()
@@ -634,10 +604,8 @@ describe('GitLens (changes tab, git lens) change tree', () => {
       // Both files hang under that one row.
       expect(container.querySelector('button[data-path="src/client/changes/a.ts"]')).not.toBeNull()
       expect(container.querySelector('button[data-path="src/client/changes/b.ts"]')).not.toBeNull()
-      // Nothing on the staged side: the band keeps its header and a zero count
-      // (an always-visible band reads as a feature, not as a missing one) but
-      // prints no tree rows.
-      expect(container.querySelector('[data-group="staged"] [data-count]')?.textContent).toBe('0')
+      // Nothing on the staged side: no empty group and no tree rows.
+      expect(container.querySelector('[data-group="staged"]')).toBeNull()
       expect(container.querySelectorAll('[data-group="staged"] [data-path]')).toHaveLength(0)
     } finally {
       act(() => { root.unmount() })
@@ -695,10 +663,8 @@ describe('GitLens (changes tab, git lens) change tree', () => {
       const stage = vi.spyOn(api, 'gitStage').mockResolvedValue({ ok: true })
       await act(async () => { stageAll!.click() })
       await flushEffects()
-      // "Stage all" stages this band's rows by explicit path, one call per
-      // path: a bare `git add -A` would also sweep in what the band does not
-      // show (a truncated snapshot, a filtered view, a conflicted side).
-      expect(stage.mock.calls.map(call => call[1])).toEqual(['src/a.ts', 'docs/b.md'])
+      // "Stage all" stages the whole worktree: no path argument.
+      expect(stage).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session' }), undefined, MAIN)
     } finally {
       act(() => { root.unmount() })
       container.remove()
@@ -864,25 +830,6 @@ describe('GitLens (changes tab, git lens) change tree', () => {
       }
     })
 
-    it('sums the whole working tree into the always-visible header chip', async () => {
-      const { container, root } = makeRoot()
-      try {
-        await mountTree(container, root, [
-          { path: 'src/a.ts', xy: ' M', unstaged: { additions: 4, deletions: 2 } },
-          { path: 'docs/c.md', xy: 'M ', staged: { additions: 3, deletions: 3 } },
-        ])
-
-        // Unstaged 4/2 + staged 3/3 = 7/5, carried on the Changes header so the
-        // size of the change set is readable even with every band folded.
-        expect(counted(container, '[data-tree-totals] [data-lines="tree-total"]'))
-          .toEqual({ added: '7', deleted: '5', text: '+7−5' })
-        expect(container.querySelector('[data-tree-totals]')?.getAttribute('data-tree-totals')).toBe('2')
-      } finally {
-        act(() => { root.unmount() })
-        container.remove()
-      }
-    })
-
     it('marks a binary blob and invents no numbers for what git never diffs', async () => {
       const { container, root } = makeRoot()
       try {
@@ -900,8 +847,6 @@ describe('GitLens (changes tab, git lens) change tree', () => {
         expect(container.querySelector('[data-path="blob.bin"] [data-lines="count"]')).toBeNull()
         // ...and with nothing to sum, the band shows no total at all.
         expect(container.querySelector('[data-group="unstaged"] [data-lines="group"]')).toBeNull()
-        // The header chip follows the same rule: no numbers anywhere, no chip.
-        expect(container.querySelector('[data-tree-totals]')).toBeNull()
         // The count pill still reports how many files changed.
         expect(container.querySelector('[data-group="unstaged"] [data-count]')?.textContent).toBe('2')
       } finally {

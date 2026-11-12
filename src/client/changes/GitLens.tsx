@@ -9,20 +9,18 @@
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
-  IconArchiveOutlineRegular,
-  IconBranchOutlineRegular, IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular,
-  IconChecklistOutlineRegular, IconCloseFillRegular, IconCodeOutlineRegular, IconCopyOutlineRegular,
-  IconDownloadOutlineRegular, IconEllipsisOutlineRegular,
-  IconFolderOpenRegular,
-  IconPlusOutlineRegular, IconRightUpOutlineRegular,
+  IconBranchOutlineRegular, IconCheckOutlineRegular, IconChevronRightOutlineRegular,
+  IconCloseFillRegular, IconCodeOutlineRegular, IconCopyOutlineRegular, IconDownloadOutlineRegular,
+  IconEllipsisOutlineRegular, IconFolderOpenRegular,
+  IconPlusOutlineRegular,
   IconRefreshOutlineRegular, IconSearchOutlineRegular, IconSparkleRegular, IconTrashOutlineRegular, Menu, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '../../context-types.ts'
 import type { GitLineCounts, GitLogEntry, GitStatusEntry, GitStatusResult, GitWorktree, SessionScope } from '../api.ts'
 import { api, SidebarApiError } from '../api.ts'
 import { builtinFileIcon, builtinFolderIcon } from '../file-icons.tsx'
 import { usePolling } from '../use-polling.ts'
+import { useSubmenuFlip } from '../menu-flip.ts'
 import { baseName, relativeTo } from '../paths.ts'
 import { resolveSidebarPath } from '../paths.ts'
 import { isZh, t } from '../locales.ts'
@@ -85,8 +83,7 @@ function countChangeFiles(nodes: readonly ChangeNode[]): number {
  * the filter box renders instead of the whole group.
  *
  * The match is a case-insensitive substring on the PATH (so `changes/git` finds
- * `src/client/changes/GitLens.tsx` and `GitLens.tsx` finds it too), which is
- * what the panel's own file names and directories both read as. A directory
+ * `src/client/changes/GitLens.tsx` and `GitLens.tsx` finds it too). A directory
  * row keeps its (possibly compressed) label: the tree shape is a view of the
  * same paths, not a second spelling of them.
  */
@@ -102,6 +99,23 @@ function filterChangeNodes(nodes: readonly ChangeNode[], needle: string): Change
     kept.push({ ...node, children, changes: countChangeFiles(children) })
   }
   return kept
+}
+
+/** One checkout root in the form comparisons use: `git rev-parse` reports
+ *  forward slashes, React state may carry the shell's backslashes, Windows
+ *  folds case, and a trailing separator means the same directory.
+ *
+ *  Case folds only for Windows spellings. POSIX keeps case: a container
+ *  workspace can legally hold `Foo` and `foo` as two different checkouts, and
+ *  folding would light up both chips. */
+function rootKey(value: string | undefined): string {
+  const key = (value ?? '').replaceAll('\\', '/').replace(/\/+$/, '')
+  return /^[a-zA-Z]:\//.test(key) ? key.toLowerCase() : key
+}
+
+/** Whether two spellings name the SAME checkout root. */
+function sameRepoRoot(left: string | undefined, right: string | undefined): boolean {
+  return rootKey(left) === rootKey(right)
 }
 
 /**
@@ -286,9 +300,6 @@ const FileRow = memo(function FileRow(props: {
   onPreview: (node: ChangeFile, staged: boolean) => void
   onContextMenu: (event: MouseEvent, node: ChangeFile, staged: boolean) => void
   onToggleStage: (path: string, staged: boolean) => void
-  /** Open the file in the editor — the row-level twin of the context menu's
-   *  first item, so a changed file is one click away without a right click. */
-  onOpen: (node: ChangeFile) => void
 }): ReactNode {
   const { row: node, staged, busy, selected } = props
   const action = staged ? t('unstage') : t('stage')
@@ -311,13 +322,6 @@ const FileRow = memo(function FileRow(props: {
             poll that answered different numbers re-renders this row with them. */}
         <LineCounts counts={node.counts} />
       </button>
-      <IconButton
-        size="sm"
-        className={css.rowAction}
-        label={t('openEditor')}
-        icon={<IconCodeOutlineRegular size={12} />}
-        onClick={(event) => { event.stopPropagation(); props.onOpen(node) }}
-      />
       <IconButton
         size="sm"
         className={css.rowAction}
@@ -344,14 +348,13 @@ const DirRow = memo(function DirRow(props: {
   open: boolean
   busy: boolean
   merge: boolean
-  /** A filter pins every directory open, so there is no state left to toggle:
-   *  the disclosure goes `disabled` instead of staying a live-looking button
-   *  whose clicks do nothing (the stage-all action beside it still works). */
-  locked: boolean
+  /** An active filter pins the row open and inert: there is nothing left to
+   *  toggle (every surviving directory is expanded by the filter itself). */
+  pinned?: boolean
   onToggle: (key: string) => void
   onToggleStage: (path: string, staged: boolean, merge?: boolean) => void
 }): ReactNode {
-  const { row: node, staged, open, busy, merge, locked } = props
+  const { row: node, staged, open, busy, merge, pinned = false } = props
   const key = `${merge ? 'm' : staged ? 's' : 'u'}:${node.path}`
   const action = staged ? t('unstageAll') : t('stageAll')
   return (
@@ -362,7 +365,7 @@ const DirRow = memo(function DirRow(props: {
         className={css.dirRow}
         data-dir={node.path}
         aria-expanded={open}
-        disabled={locked}
+        disabled={pinned}
         title={node.path}
         onClick={() => { props.onToggle(key) }}
       >
@@ -420,15 +423,10 @@ export interface GitLensProps {
   /** The tab's context, for the registered file/folder icon chain (absent →
    *  the host's built-in artwork, exactly like the file tree falls back). */
   ctx?: Context
-  /** The tab's lens switcher (Git / this round's files). The tab owns the
-   *  control because it owns the lens state; the git lens only decides where it
-   *  sits — first in the chip row, so the segmented control and the chips read
-   *  as one band instead of two stacked toolbars. */
-  lensSwitch?: ReactNode
 }
 
 export function GitLens(props: GitLensProps) {
-  const { scope, onOpenFile, onPreview, selectedRef, visible, active = visible, ctx, lensSwitch } = props
+  const { scope, onOpenFile, onPreview, selectedRef, visible, active = visible, ctx } = props
 
   const service = ctx?.get('betterSidebar')
   /** The file row's artwork: a registered icon wins, else the host's own
@@ -449,9 +447,9 @@ export function GitLens(props: GitLensProps) {
     () => (repoRoot === undefined ? scope : { ...scope, repoRoot }),
     [scope, repoRoot],
   )
-  /** Every repository of the session workspace: the chip and the More menu read
-   *  it, and the status snapshot reports the whole discovery on every tick —
-   *  the repo selector's options are therefore re-derivable from the answer. */
+  /** Every repository of the session workspace, kept once discovered: the
+   *  status of a SELECTED child reports only itself, so the selector's option
+   *  list cannot be re-derived from the current snapshot alone. */
   const [repoChoices, setRepoChoices] = useState<string[]>([])
   const [branchNames, setBranchNames] = useState<string[]>([])
   /** Bumped by every explicit refresh, the repo/worktree switch and the
@@ -459,17 +457,23 @@ export function GitLens(props: GitLensProps) {
    *  its own bounded page on each tick instead of duplicating status here. */
   const [graphRefresh, setGraphRefresh] = useState(0)
   const [changesOpen, setChangesOpen] = useState(true)
+  const [graphOpen, setGraphOpen] = useState(true)
   /** The file filter over the change list (a case-insensitive path substring).
    *  Typing NARROWS the groups in place — the same rows, their directories
    *  pruned — instead of opening a second, differently-shaped result list. */
   const [filter, setFilter] = useState('')
-  /** The Graph starts folded: the change list is the primary surface, and an
-   *  open graph would fire its first `git.graph` page on every mount even
-   *  when the user never scrolls to it. */
-  const [graphOpen, setGraphOpen] = useState(false)
-  const [moreOpen, setMoreOpen] = useState(false)
+  /**
+   * The open More Actions menu: the trigger's viewport corner (null = closed).
+   * Its repo/worktree rows carry nested submenus, which the primitives anchor
+   * with static CSS growing RIGHT of the card — past the right edge of this
+   * docked panel. This menu is button-anchored (no cursor point to publish),
+   * so open/close keeps the measured corner and hands it to the same flip
+   * mechanism as the file-tree row menu.
+   */
+  const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null)
+  const moreOpen = moreMenu !== null
+  useSubmenuFlip(moreMenu)
   const [branchOpen, setBranchOpen] = useState(false)
-  const [repoOpen, setRepoOpen] = useState(false)
   /** Commit drafts, one per scope: the Commit button asks only for a message
    *  and a staged row, so a draft typed against another project would submit
    *  verbatim under this one. Keyed rather than cleared on a scope swap, so a
@@ -600,11 +604,7 @@ export function GitLens(props: GitLensProps) {
   const snapshot: GitStatusResult | null = status.snapshot ?? lastStatus.current.value
   useEffect(() => {
     const repositories = snapshot?.repositories
-    // `repositories` is the whole DISCOVERY of the session cwd, whatever child
-    // is selected (see `status()` in src/git.ts), so the answer is the truth:
-    // a workspace that dropped back to ONE repository must clear the list too,
-    // or the chip keeps offering a repository that no longer exists.
-    if (repositories !== undefined) setRepoChoices(repositories.length > 1 ? repositories : [])
+    if (repositories !== undefined && repositories.length > 1) setRepoChoices(repositories)
   }, [snapshot])
 
   /** Select one checkout (or none) and remember the choice synchronously. */
@@ -617,22 +617,18 @@ export function GitLens(props: GitLensProps) {
   const clearDerived = (): void => {
     scopeGen.current += 1
     actionLock.current = null
+    setFilter('')
     setBusy(false)
     setSuggesting(false)
     setCommitting(false)
     setBranchNames([])
-    // A needle typed against the previous checkout (or the previous session)
-    // must not silently keep hiding rows of the one that took over: the filter
-    // is a view of THIS change list, not a global preference.
-    setFilter('')
     setGraphRefresh(value => value + 1)
     setActionError(null)
     setFileMenu(null)
     setHistoryMenu(null)
     setConfirm(null)
-    setMoreOpen(false)
+    setMoreMenu(null)
     setBranchOpen(false)
-    setRepoOpen(false)
   }
 
   /** Load the branch choices of one checkout; its history is the commit
@@ -767,13 +763,6 @@ export function GitLens(props: GitLensProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible])
 
-  // Folding the change list takes the filter box — and with it the only way to
-  // clear the needle — off screen. A needle that kept pruning the groups while
-  // its own UI was gone read as "the groups are broken" on the way back in.
-  useEffect(() => {
-    if (!changesOpen) setFilter('')
-  }, [changesOpen])
-
   /** The inventory poll: a linked checkout created mid-session shows up
    *  without a manual refresh (the status poll itself belongs to the store). */
   const pollInventory = useCallback((signal: AbortSignal): Promise<void> => refresh(true, signal), [refresh])
@@ -822,18 +811,9 @@ export function GitLens(props: GitLensProps) {
     // With conflicts, directory/all actions must only touch their own group:
     // git add/reset on the whole directory would silently resolve/reset Merge.
     const rows = staged ? stagedEntries : merge || mergeEntries.some(entry => entry.path === path) ? mergeEntries : unstagedEntries
-    // An explicit path list, never a bare `git add -A`: a group action must
-    // stage exactly the rows the group shows (a truncated snapshot, a filter or
-    // a conflict side all hide rows that `-A` would have swept in anyway), and
-    // `git add -- <path>` records a removal too, so a deleted file stages the
-    // same way. Same shape as the directory rows above, which already resolve
-    // to their subtree's paths.
-    const paths = path !== undefined && mergeEntries.length === 0
-      ? [path]
-      : rows
-        .filter(entry => path === undefined || entry.path === path || entry.path.startsWith(`${path}/`))
-        .map(entry => entry.path)
-    if (paths.length === 0) return
+    const paths = mergeEntries.length === 0 ? [path] : rows
+      .filter(entry => path === undefined || entry.path === path || entry.path.startsWith(`${path}/`))
+      .map(entry => entry.path)
     void runAction(async () => {
       for (const selectedPath of paths) {
         if (staged) await api.gitUnstage(gitScope, selectedPath, target)
@@ -1040,6 +1020,7 @@ export function GitLens(props: GitLensProps) {
   // can never disagree with the numbers printed under it.
   const unstagedTotal = useMemo(() => sumLineCounts(unstagedTree), [unstagedTree])
   const stagedTotal = useMemo(() => sumLineCounts(stagedTree), [stagedTree])
+
   /** The typed filter as the trees read it (empty ⇒ no filtering at all). */
   const needle = filter.trim().toLowerCase()
   // One pruned copy per group, rebuilt only when the needle or the group's own
@@ -1050,10 +1031,7 @@ export function GitLens(props: GitLensProps) {
   const unstagedView = useMemo(() => (needle === '' ? unstagedTree : filterChangeNodes(unstagedTree, needle)), [needle, unstagedTree])
   /** The whole working tree in one pair of numbers — the header's summary chip.
    *  It sums the three *pruned* views the groups render, so a filtered list
-   *  shows the same numbers in the header as in its bands (with no needle the
-   *  views are the trees themselves, so the numbers are the plain working-tree
-   *  sums; a path changed on both sides keeps contributing each side's reading,
-   *  exactly like its two rows do). */
+   *  shows the same numbers in the header as in its bands. */
   const treeTotal = useMemo(() => {
     const bands = [sumLineCounts(mergeView), sumLineCounts(stagedView), sumLineCounts(unstagedView)]
     return {
@@ -1065,6 +1043,10 @@ export function GitLens(props: GitLensProps) {
   /** How many rows the filter currently shows (0 with a needle ⇒ "no match"). */
   const matchedCount = needle === '' ? 0
     : countChangeFiles(mergeView) + countChangeFiles(stagedView) + countChangeFiles(unstagedView)
+  /** The band's own rows under the active filter (an idle needle passes the
+   *  list through). The group header's count and totals follow these. */
+  const filterRows = (rows: readonly GitStatusEntry[]): readonly GitStatusEntry[] =>
+    needle === '' ? rows : rows.filter(entry => entry.path.toLowerCase().includes(needle))
   const isRepo = snapshot?.isRepo === true
   const branch = snapshot?.branch ?? ''
   const clean = isRepo && entries.length === 0
@@ -1081,63 +1063,6 @@ export function GitLens(props: GitLensProps) {
     : snapshot?.upstream === undefined ? t('gitNoUpstream')
     : snapshot.ahead === undefined || snapshot.behind === undefined ? t('gitSyncUnavailable')
     : `${t('gitSync')}: ${snapshot.upstream} · ${snapshot.behind}↓ ${snapshot.ahead}↑`
-
-  /** Rows of the More Actions menu. Checkouts, branches and worktrees are FLAT
-   *  rows under their own headings, never nested `submenu` cards: the host card
-   *  opens to the RIGHT, which is off-screen from a panel pinned to the
-   *  window's right edge (the row looked dead — a click "did nothing"), and a
-   *  menu carrying a submenu row also forfeits the host's viewport-fit scroll,
-   *  so a container with 50+ child repositories ran off the screen. Flat rows
-   *  keep the card scrollable and every row clickable.
-   *
-   *  The BRANCH rows are a deliberate SECOND route to `checkout()`: the branch
-   *  chip is the first one, and a narrow panel can clip the chip row (see
-   *  `.toolbarPills`), so the menu has to be able to switch branch on its own.
-   *  Memoized: this array is the menu's whole prop surface, and the git poll
-   *  re-renders this component every couple of seconds. */
-  const currentWorktree = selectedWorktree ?? primaryWorktree
-  const currentRepoRoot = repoRoot ?? snapshot?.root ?? repoChoices[0] ?? ''
-  const currentRepoLabel = baseName(currentRepoRoot) || currentRepoRoot
-  const detached = snapshot?.detached === true
-  const moreItems = useMemo<MenuEntry[]>(() => [
-    { id: 'pull', label: t('pull'), disabled: busy || suggesting || detached },
-    { id: 'push', label: t('push'), disabled: busy || suggesting || detached },
-    ...(branchNames.length > 0 ? [
-      { type: 'separator', id: 'more-branches-separator' } satisfies MenuEntry,
-      { type: 'label', id: 'more-branches-label', text: t('branch') } satisfies MenuEntry,
-      ...branchNames.map((name): MenuEntry => ({
-        id: `branch:${name}`,
-        label: name,
-        disabled: busy || suggesting,
-      })),
-    ] : []),
-    ...(repoChoices.length > 1 ? [
-      { type: 'separator', id: 'more-repos-separator' } satisfies MenuEntry,
-      { type: 'label', id: 'more-repos-label', text: t('gitRepository') } satisfies MenuEntry,
-      ...repoChoices.map((root): MenuEntry => ({
-        id: `repo:${root}`,
-        label: baseName(root) || root,
-        disabled: busy || suggesting,
-      })),
-    ] : []),
-    ...(worktrees.length > 1 ? [
-      { type: 'separator', id: 'more-worktrees-separator' } satisfies MenuEntry,
-      { type: 'label', id: 'more-worktrees-label', text: t('worktree') } satisfies MenuEntry,
-      ...worktrees.map((entry): MenuEntry => ({
-        id: `worktree:${entry.path}`,
-        label: `${entry.branch || t('gitDetached')} · ${baseName(entry.path)} (${entry.changes})`,
-        disabled: busy || suggesting,
-      })),
-    ] : []),
-  ], [branchNames, busy, detached, repoChoices, suggesting, worktrees])
-
-  /** The rows that carry the host's own check mark: the active branch, the
-   *  active checkout and the active worktree. */
-  const moreSelectedIds = useMemo(() => [
-    ...(branch !== '' ? [`branch:${branch}`] : []),
-    ...(currentRepoRoot !== '' ? [`repo:${currentRepoRoot}`] : []),
-    ...(currentWorktree === undefined ? [] : [`worktree:${currentWorktree}`]),
-  ], [branch, currentRepoRoot, currentWorktree])
 
   /** Fold or unfold one directory row (keyed per group, see `collapsed`).
    *  Stable: it is a memoized row's prop. */
@@ -1156,7 +1081,6 @@ export function GitLens(props: GitLensProps) {
   const rowActions = useRef({
     preview: (_node: ChangeFile, _staged: boolean): void => { /* replaced below */ },
     stage: (_path: string, _staged: boolean, _merge?: boolean): void => { /* replaced below */ },
-    open: (_node: ChangeFile): void => { /* replaced below */ },
   })
   useEffect(() => {
     rowActions.current = {
@@ -1164,21 +1088,12 @@ export function GitLens(props: GitLensProps) {
         onPreview(worktreeRefOf(node.path, isUntrackedStatus(node.status), staged, chosenPathRef.current, repoRootRef.current))
       },
       stage: (path, staged, merge) => { stageEntry(path, staged, merge) },
-      // The row's open action resolves exactly like the context menu's first
-      // item: against the selected worktree first, then the repo root, so a
-      // linked checkout's file opens from ITS checkout, not the primary one.
-      open: (node) => {
-        onOpenFile(resolveSidebarPath(selectedWorktree ?? repoRoot ?? snapshot?.root ?? scope.cwd, node.path))
-      },
     }
   })
 
   /** Stable row callbacks (see rowActions). */
   const previewFile = useCallback((node: ChangeFile, staged: boolean): void => {
     rowActions.current.preview(node, staged)
-  }, [])
-  const openFile = useCallback((node: ChangeFile): void => {
-    rowActions.current.open(node)
   }, [])
   const stagePath = useCallback((path: string, staged: boolean, merge = false): void => {
     rowActions.current.stage(path, staged, merge)
@@ -1202,196 +1117,59 @@ export function GitLens(props: GitLensProps) {
       onPreview={previewFile}
       onContextMenu={openRowMenu}
       onToggleStage={stagePath}
-      onOpen={openFile}
     />
   )
 
-  const renderDir = (node: ChangeDir, staged: boolean, merge: boolean, depth = 0): ReactNode => {
+  const renderDir = (node: ChangeDir, staged: boolean, merge: boolean, depth = 0, pinned = false): ReactNode => {
     const key = `${merge ? 'm' : staged ? 's' : 'u'}:${node.path}`
-    // A filtered list opens every surviving directory: a match hidden inside a
-    // folded folder would read as "no match" even though the row is there.
-    const open = needle !== '' ? true : !collapsed.has(key)
+    const open = pinned || !collapsed.has(key)
     return (
       <div key={`dir:${key}`}>
         <DirRow row={node} depth={depth} folderGlyph={folderGlyph} staged={staged}
-          open={open} busy={busy || suggesting} merge={merge} locked={needle !== ''}
-          onToggle={toggleDir} onToggleStage={stagePath} />
+          open={open} busy={busy || suggesting} merge={merge} pinned={pinned} onToggle={toggleDir} onToggleStage={stagePath} />
         {open && node.children.map(child => child.kind === 'dir'
-          ? renderDir(child, staged, merge, depth + 1) : renderFile(child, staged, depth + 1))}
+          ? renderDir(child, staged, merge, depth + 1, pinned) : renderFile(child, staged, depth + 1))}
       </div>
     )
   }
 
-  const renderTree = (nodes: readonly ChangeNode[], staged: boolean, merge = false): ReactNode => (
+  const renderTree = (nodes: readonly ChangeNode[], staged: boolean, merge = false, pinned = false): ReactNode => (
     <div className={css.tree}>
-      {nodes.map(node => (node.kind === 'dir' ? renderDir(node, staged, merge) : renderFile(node, staged)))}
+      {nodes.map(node => (node.kind === 'dir' ? renderDir(node, staged, merge, 0, pinned) : renderFile(node, staged)))}
     </div>
   )
 
-  /** One band of the changes list. `always` keeps the band's header (title +
-   *  count) even when the band is empty: "staged" and "unstaged" are the two
-   *  halves a reader reasons about, and a header that disappears when the half
-   *  is empty reads as a feature that disappeared. The merge band stays
-   *  conditional — it only exists while a conflicted merge is in progress. */
-  const renderGroup = (id: string, label: string, nodes: readonly ChangeNode[], staged: boolean, merge = false, always = false): ReactNode => {
-    const count = countChangeFiles(nodes)
-    if (count === 0 && !always) return null
+  const renderGroup = (id: string, label: string, rows: readonly GitStatusEntry[], nodes: readonly ChangeNode[], staged: boolean, merge = false): ReactNode => {
+    if (rows.length === 0) return null
     const key = `group:${id}`
-    const open = needle !== '' ? true : !collapsed.has(key)
-    // The band totals (#131) follow the rows actually printed: while filtering
-    // they are re-summed over the pruned tree, and the header chip sums those
-    // same pruned views (see `treeTotal`), so a filtered view shows one set of
-    // numbers in the header and in its bands — never a count from a hidden row.
-    const totals = needle !== ''
-      ? (merge ? undefined : sumLineCounts(nodes))
-      : (staged ? stagedTotal : merge ? undefined : unstagedTotal)
+    // An active filter pins the group open and inert: every surviving
+    // directory is expanded by the filter itself, so the disclosure has
+    // nothing left to toggle.
+    const pinned = needle !== ''
+    const open = pinned || !collapsed.has(key)
+    const totals = merge ? undefined : sumLineCounts(nodes)
     return (
       <div className={css.group} data-group={id}>
         <div className={`${css.scmHeader} ${css.groupHeader}`}>
-          {/* A needle pins the band open, so its disclosure has nothing left to
-              toggle: `disabled` keeps it from looking live. */}
-          <button type="button" className={css.scmDisclosure} aria-expanded={open} aria-label={`${label} (${count})`}
-            disabled={needle !== ''} onClick={() => { toggleDir(key) }}>
+          <button type="button" className={css.scmDisclosure} aria-expanded={open} disabled={pinned} aria-label={`${label} (${rows.length})`} onClick={() => { toggleDir(key) }}>
             <span className={css.chevron} data-open={open ? 'true' : undefined} aria-hidden="true"><IconChevronRightOutlineRegular size={12} /></span>
             {label}
             {totals !== undefined && totals.files > 0 && <PlusMinus additions={totals.additions} deletions={totals.deletions} note="group" />}
           </button>
-          <IconButton className={css.headerAction} size="sm" disabled={busy || suggesting || count === 0}
+          <IconButton className={css.headerAction} size="sm" disabled={busy || suggesting}
             label={staged ? t('unstageAll') : t('stageAll')}
             icon={staged ? MINUS_ICON : <IconPlusOutlineRegular size={12} />}
             onClick={() => { stageAll(staged, merge) }} />
-          <span className={css.countPill} data-count={count}>{count}</span>
+          <span className={css.countPill} data-count={rows.length}>{rows.length}</span>
         </div>
-        {open && count > 0 && renderTree(nodes, staged, merge)}
+        {open && renderTree(nodes, staged, merge, pinned)}
       </div>
     )
   }
 
   return (
     <div className={css.git} data-git-root>
-      {/*
-        The chip row, docked at the top: repo · branch (+N −M) · upstream, then
-        the action cluster. A sibling of the scroller, so it stays usable with
-        both sections folded, and the only place the docked controls live —
-        one row, one place to look. The band itself also renders in a NON-repo
-        workspace when the tab hands in a `lensSwitch`: the switch must never
-        be trapped behind `isRepo` (a workspace without a repo would lose the
-        only way back to the session lens).
-      */}
-      {(isRepo || lensSwitch !== undefined) && <div className={css.gitToolbar} data-git-toolbar>
-        <div className={css.toolbarRow} data-toolbar-row>
-          {/* The lens switch (Git / this round's files) rides in the same
-              visual band, ahead of the chips: one control row, whichever lens
-              is showing. Rendered by the tab, which owns the state. */}
-          {lensSwitch !== undefined && <div className={css.lensSwitch}>{lensSwitch}</div>}
-          {isRepo && <>
-          <div className={css.toolbarPills} data-toolbar-pills>
-            {repoChoices.length > 1 && (
-              <Menu open={repoOpen} onClose={() => { setRepoOpen(false) }} portal compact align="start" autoFocus
-                className={css.pillMenu}
-                anchor={<button type="button" className={css.pill} aria-haspopup="menu" aria-expanded={repoOpen}
-                  data-git-repo
-                  title={`${t('gitRepository')}: ${currentRepoLabel}`} disabled={busy || suggesting}
-                  onClick={() => { setRepoOpen(open => !open) }}>
-                  {/* The repo root's glyph comes from the host set (AGENTS: no
-                      hand-rolled SVG): there is no git/repo icon there, so the
-                      archive box — lid + body, the closest silhouette to the box
-                      a repository is drawn as — stands in. */}
-                  <IconArchiveOutlineRegular size={13} /><span>{currentRepoLabel}</span>
-                  <IconChevronDownOutlineRegular className={css.pillChevron} size={11} />
-                </button>}
-                items={repoChoices.map(root => ({
-                  id: root,
-                  label: baseName(root) || root,
-                  disabled: busy || suggesting,
-                }))}
-                selectedId={currentRepoRoot}
-                onSelect={root => { setRepoOpen(false); chooseRepo(root) }} />
-            )}
-            {/* The branch chip carries the branch itself plus the working
-                tree's own numbers: one glance says which branch and how big
-                the change set is. */}
-            <Menu open={branchOpen} onClose={() => { setBranchOpen(false) }} portal compact align="start" autoFocus
-              className={css.pillMenu}
-              anchor={<button type="button" className={css.pill} aria-haspopup="menu" aria-expanded={branchOpen}
-                data-git-branch
-                title={`${t('branch')}: ${branchLabel}${branchMarkers}`} disabled={busy || suggesting}
-                onClick={() => { setBranchOpen(open => !open) }}>
-                <IconBranchOutlineRegular size={13} />
-                <span className={css.pillLabel}>{t('branch')}</span>
-                <span>{branchLabel}{branchMarkers}</span>
-                <IconChevronDownOutlineRegular className={css.pillChevron} size={11} />
-                {treeTotal.files > 0 && (
-                  <span className={css.pillCounts}>
-                    <PlusMinus additions={treeTotal.additions} deletions={treeTotal.deletions} note="toolbar" />
-                  </span>
-                )}
-              </button>}
-              items={branchNames.length === 0 ? [{ id: 'none', label: t('gitBranchesUnavailable'), disabled: true }]
-                : branchNames.map(name => ({ id: name, label: name, disabled: busy || suggesting }))}
-              selectedId={branch}
-              onSelect={name => { setBranchOpen(false); void checkout(name) }} />
-            {/* `branch → upstream` reads as the sync target itself, with the
-                genuine ahead/behind counts beside it; the chip itself is the
-                sync action (pull then push), so one click does the whole
-                round trip. Pull and push alone are the cluster's own buttons. */}
-            {/* The chip is the sync action (pull then push), so one click does
-                the whole round trip. Its accessible name is its visible text —
-                an `aria-label` that said something else would break WCAG 2.5.3
-                (the visible label would no longer be part of the name). */}
-            <button type="button" className={css.pill} data-git-sync
-              title={syncLabel} disabled={!canSync} onClick={sync}>
-              <span>{snapshot?.upstream !== undefined ? `${branchLabel} → ${snapshot.upstream}` : syncLabel}</span>
-              {snapshot?.upstream !== undefined && snapshot.ahead !== undefined && snapshot.behind !== undefined && (
-                <span className={css.pillCounts}>{`${snapshot.behind}↓ ${snapshot.ahead}↑`}</span>
-              )}
-            </button>
-          </div>
-          <div className={css.toolbarActions} data-toolbar-actions>
-            {/* A native trigger, not the kit's `IconButton`: the kit button
-                only publishes `aria-pressed`, and a menu trigger has to say
-                "this opens a menu" and whether it is open. */}
-            <Menu open={moreOpen} onClose={() => { setMoreOpen(false) }} portal compact align="end" autoFocus
-              anchor={<button type="button" className={css.toolbarIcon} aria-haspopup="menu" aria-expanded={moreOpen}
-                aria-label={t('gitMoreActions')} title={t('gitMoreActions')} data-git-more
-                data-active={moreOpen ? 'true' : undefined}
-                onClick={() => { setMoreOpen(open => !open) }}>
-                <IconEllipsisOutlineRegular size={14} />
-              </button>}
-              items={moreItems}
-              selectedIds={moreSelectedIds}
-              onSelect={id => {
-                setMoreOpen(false)
-                if (id === 'push') push()
-                else if (id === 'pull') pull()
-                else if (id.startsWith('branch:')) void checkout(id.slice(7))
-                else if (id.startsWith('repo:')) chooseRepo(id.slice(5))
-                else if (id.startsWith('worktree:')) chooseWorktree(id.slice(9))
-              }} />
-            <IconButton size="sm" icon={<IconRefreshOutlineRegular size={14} />} label={t('refresh')}
-              disabled={busy || suggesting} onClick={() => { invalidateGitStatus(scope.sessionId); void refresh(false) }} />
-            <IconButton size="sm" icon={<IconDownloadOutlineRegular size={14} />} label={t('pull')}
-              active={(snapshot?.behind ?? 0) > 0}
-              disabled={busy || suggesting || snapshot?.detached === true} onClick={pull} />
-            <IconButton size="sm" icon={<IconRightUpOutlineRegular size={14} />} label={t('push')}
-              active={(snapshot?.ahead ?? 0) > 0}
-              disabled={busy || suggesting || snapshot?.detached === true} onClick={push} />
-            <IconButton size="sm" icon={<IconChecklistOutlineRegular size={14} />} label={t('stageAll')}
-              disabled={busy || suggesting || mergeEntries.length > 0 || unstagedEntries.length === 0}
-              onClick={() => { stageAll(false) }} />
-            <IconButton size="sm" icon={<IconCheckOutlineRegular size={14} />} label={t('commit')}
-              disabled={!canCommit} onClick={commit} />
-          </div>
-          </>}
-        </div>
-        {actionError !== null && <Notice kind="error" tone="inline" role="alert" className={css.actionError}>
-          <span className={css.actionErrorText}>{actionError}</span>
-          <IconButton size="sm" icon={<IconCloseFillRegular size={12} />} label={t('dismiss')}
-            onClick={() => { setActionError(null) }} />
-        </Notice>}
-      </div>}
-
-      {/* Changes and Graph scroll together under the chip row. */}
+      {/* Changes and Graph scroll together; only the branch/sync footer docks. */}
       <div className={css.gitScroll} data-git-scroll>
         {viewError !== null && <Notice kind="error" role="alert">{viewError}</Notice>}
 
@@ -1399,6 +1177,27 @@ export function GitLens(props: GitLensProps) {
         {snapshot === null && !status.loading && status.error && <Notice kind="error" tone="page">{t('error')}</Notice>}
         {snapshot !== null && !isRepo && <Notice kind="empty" tone="page">{t('notRepo')}</Notice>}
         {snapshot?.truncated === true && <Notice kind="warn">{t('statusTruncated')}</Notice>}
+
+        {/* A container workspace can hold several independent repositories, and
+            every view below is pinned to ONE of them — without this row the
+            panel silently shows the first root, so nothing on screen says the
+            others exist. The switcher is not a second source of truth:
+            `repoChoices` comes from the status snapshot, `chooseRepo` re-pins
+            the scope (reads, writes, graph) to the clicked root. */}
+        {isRepo && repoChoices.length > 1 && (
+          <div className={css.repoSwitcher} data-scm-repos role="group" aria-label={t('gitRepository')}>
+            {repoChoices.map(root => {
+              const isActive = sameRepoRoot(root, repoRoot ?? snapshot?.root)
+              return (
+                <button key={root} type="button" className={css.repoChip} data-scm-repo={root}
+                  data-active={isActive ? 'true' : undefined} aria-pressed={isActive} title={root}
+                  disabled={busy || suggesting} onClick={() => { chooseRepo(root) }}>
+                  {baseName(root)}
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         {isRepo && (
           <section className={css.changesSection} data-scm-section="changes">
@@ -1410,14 +1209,48 @@ export function GitLens(props: GitLensProps) {
                 </span>
                 {t('gitChanges')}
               </button>
-              {/* The working tree's own numbers, always visible (unlike the
-                  hover-revealed actions): one glance says how big the change
-                  set is, whatever the bands below are folded to. */}
+              {/* The working tree's own numbers, always visible: one glance says
+                  how big the change set is, whatever the bands below are folded
+                  to. Follows the filtered views, so the numbers match the rows. */}
               {treeTotal.files > 0 && (
                 <span className={css.treeTotals} data-tree-totals={treeTotal.files}>
                   <PlusMinus additions={treeTotal.additions} deletions={treeTotal.deletions} note="tree-total" />
                 </span>
               )}
+              <div className={css.scmActions}>
+                <IconButton size="sm" icon={<IconCheckOutlineRegular size={14} />} label={t('commit')}
+                  disabled={!canCommit} onClick={commit} />
+                <IconButton size="sm" icon={<IconRefreshOutlineRegular size={14} />} label={t('refresh')}
+                  disabled={busy || suggesting} onClick={() => { invalidateGitStatus(scope.sessionId); void refresh(false) }} />
+                <Menu open={moreOpen} onClose={() => { setMoreMenu(null) }} portal compact align="end" autoFocus
+                  anchor={<IconButton size="sm" icon={<IconEllipsisOutlineRegular size={14} />} label={t('gitMoreActions')}
+                    active={moreOpen} onClick={(event) => {
+                      if (moreOpen) { setMoreMenu(null); return }
+                      // The menu hangs off this button, so its corner IS the anchor the
+                      // flip heuristic needs (a keyboard activation has no cursor point).
+                      const rect = event.currentTarget.getBoundingClientRect()
+                      setMoreMenu({ x: rect.right, y: rect.top })
+                    }} />}
+                  items={[
+                    { id: 'pull', label: t('pull'), disabled: busy || suggesting || snapshot?.detached === true },
+                    { id: 'push', label: t('push'), disabled: busy || suggesting || snapshot?.detached === true },
+                    ...(repoChoices.length > 1 ? [{ id: 'repos', label: t('gitRepository'),
+                      submenu: repoChoices.map(root => ({ id: `repo:${root}`, label: baseName(root), disabled: busy || suggesting })),
+                    }] : []),
+                    ...(worktrees.length > 1 ? [{ id: 'worktrees', label: t('worktree'),
+                      submenu: worktrees.map(entry => ({ id: `worktree:${entry.path}`,
+                        label: `${entry.branch || t('gitDetached')} · ${baseName(entry.path)} (${entry.changes})`, disabled: busy || suggesting,
+                      })),
+                    }] : []),
+                  ]}
+                  onSelect={id => {
+                    setMoreMenu(null)
+                    if (id === 'push') push()
+                    else if (id === 'pull') pull()
+                    else if (id.startsWith('repo:')) chooseRepo(id.slice(5))
+                    else if (id.startsWith('worktree:')) chooseWorktree(id.slice(9))
+                  }} />
+              </div>
             </div>
             {changesOpen && <div data-scm-changes>
               <div className={css.messageBox} data-message-box>
@@ -1474,14 +1307,9 @@ export function GitLens(props: GitLensProps) {
               )}
               {clean && <Notice kind="empty">{t('changesClean')}</Notice>}
               {needle !== '' && !clean && matchedCount === 0 && <Notice kind="empty">{t('gitFilterEmpty')}</Notice>}
-              {/* Staged and unstaged always print their headers (see
-                  `renderGroup`); a fully clean tree shows the notice alone —
-                  two "0" bands under "No changes" would just be noise. */}
-              {!clean && <>
-                {renderGroup('merge', t('gitMergeChanges'), mergeView, false, true)}
-                {renderGroup('staged', t('gitStagedChanges'), stagedView, true, false, true)}
-                {renderGroup('unstaged', t('gitChanges'), unstagedView, false, false, true)}
-              </>}
+              {renderGroup('merge', t('gitMergeChanges'), filterRows(mergeEntries), mergeView, false, true)}
+              {renderGroup('staged', t('gitStagedChanges'), filterRows(stagedEntries), stagedView, true)}
+              {renderGroup('unstaged', t('gitChanges'), filterRows(unstagedEntries), unstagedView, false)}
             </div>}
           </section>
         )}
@@ -1511,6 +1339,34 @@ export function GitLens(props: GitLensProps) {
           </div>}
         </section>}
       </div>
+
+      {/* A sibling of the scroller: usable even with both sections folded. */}
+      {isRepo && <div className={css.gitFooter} data-git-footer>
+        {actionError !== null && <Notice kind="error" tone="inline" role="alert" className={css.actionError}>
+          <span className={css.actionErrorText}>{actionError}</span>
+          <IconButton size="sm" icon={<IconCloseFillRegular size={12} />} label={t('dismiss')}
+            onClick={() => { setActionError(null) }} />
+        </Notice>}
+        <div className={css.footerRow} data-footer-row>
+          <Menu open={branchOpen} onClose={() => { setBranchOpen(false) }} portal compact side="top" autoFocus
+            className={css.branchMenu}
+            anchor={<button type="button" className={css.branchButton} aria-haspopup="menu" aria-expanded={branchOpen}
+              title={`${t('branch')}: ${branchLabel}${branchMarkers}`} disabled={busy || suggesting}
+              onClick={() => { setBranchOpen(open => !open) }}>
+              <IconBranchOutlineRegular size={14} /><span>{branchLabel}{branchMarkers}</span>
+            </button>}
+            items={branchNames.length === 0 ? [{ id: 'none', label: t('gitBranchesUnavailable'), disabled: true }]
+              : branchNames.map(name => ({ id: name, label: name, disabled: busy || suggesting }))}
+            selectedId={branch}
+            onSelect={name => { setBranchOpen(false); void checkout(name) }} />
+          <button type="button" className={css.syncButton} aria-label={syncLabel} title={syncLabel}
+            disabled={!canSync} onClick={sync}>
+            <IconRefreshOutlineRegular size={11} />
+            <span>{snapshot?.upstream !== undefined && snapshot.ahead !== undefined && snapshot.behind !== undefined
+              ? `${snapshot.behind}↓ ${snapshot.ahead}↑` : syncLabel}</span>
+          </button>
+        </div>
+      </div>}
 
       {/*
         The one shared file-row context menu, positioned at the right-click
@@ -1548,13 +1404,6 @@ export function GitLens(props: GitLensProps) {
             onOpenFile(resolved)
             return
           }
-          if (id === 'reveal-in-tree') {
-            const resolved = resolveSidebarPath(selectedWorktree ?? repoRoot ?? snapshot?.root ?? scope.cwd, target.path)
-            const s = ctx?.get('betterSidebar')
-            s?.openTab({ type: 'editor', target: 'side', reveal: true }, scope)
-            window.dispatchEvent(new CustomEvent('dsh-sidebar:reveal-path', { detail: { path: resolved } }))
-            return
-          }
           if (id === 'stage') {
             stageEntry(target.path, target.staged)
             return
@@ -1566,6 +1415,11 @@ export function GitLens(props: GitLensProps) {
               confirmLabel: t('discard'),
               onConfirm: () => api.gitDiscard(gitScopeNow(), target.path, selectedWorktree),
             })
+            return
+          }
+          if (id === 'reveal-in-tree') {
+            const resolved = resolveSidebarPath(selectedWorktree ?? repoRoot ?? snapshot?.root ?? scope.cwd, target.path)
+            window.dispatchEvent(new CustomEvent('dsh-sidebar:reveal-path', { detail: { path: resolved } }))
             return
           }
           if (id === 'relative') {

@@ -33,18 +33,21 @@ import {
   type GitGutterHost,
 } from './editor-git-gutter.ts'
 import { api, htmlUrl, SidebarApiError } from './api.ts'
-import { hostTransportBase } from './desktop-env.ts'
+import { hostHttpBase } from './desktop-env.ts'
 import { markdownPreviewSource } from './markdown-frontmatter.ts'
-import { rewriteLocalImageUrls } from './markdown-images.ts'
+import { createMarkdownPathImages } from './markdown-images.ts'
 import { rewriteLocalMarkdownLinks } from './markdown-navigation.ts'
 import { languageForPath } from './lang.ts'
 import { cmSurfaceTheme, CmThemeCompartment } from './cm-themes.ts'
 import { cmSearchExtensions, CmSearchPhrases } from './cm-search.ts'
+import { clearDraftBackup, draftBackupBaseMtime, flushDraftBackups, readDraftBackup, registerDraftSource, sameDocument, scheduleDraftBackup } from './editor-draft-backup.ts'
+import { flashQuoteLines, quoteFlashField, quoteFlashHighlight } from './quote-flash.ts'
 import { isDarkScheme, subscribeColorScheme } from './theme.ts'
 import { SandboxStatusBar } from './SandboxStatusBar.tsx'
 import { insertReferenceOrText, type PendingReference } from './conversation-draft.ts'
 import { useSelectionPopup } from './selection-popup.ts'
-import { buildSelectionInsert, linesOfSelection } from './selection-payload.ts'
+import { buildSelectionInsert, linesOfSelection, type SelectionLines } from './selection-payload.ts'
+import { insertQuoteChip, type QuoteSelection } from './selection-quote.ts'
 import { analyzeMarkdownHtml } from './markdown-html.ts'
 import { LazyMermaidMarkdown, MarkdownDocument, type MarkdownHtmlMedia } from './MarkdownHtml.tsx'
 import { LargeFileView } from './LargeFileView.tsx'
@@ -52,12 +55,40 @@ import { useMarkdownSurface } from './use-markdown-surface.ts'
 import { MdToc } from './md-toc.tsx'
 import { splitMermaidBlocks } from './mermaid-blocks.ts'
 import { localeSignature, t } from './locales.ts'
-import { HTML_IFRAME_SANDBOX } from './html-preview.ts'
+import { HtmlPreviewFrame } from './HtmlPreviewFrame.tsx'
 import type { EditorToolbarState, FileViewerProps } from './service.ts'
 import css from './sidebar.module.css'
 
 /** Previewable files (rendered output vs source editing). */
 type ViewMode = 'preview' | 'edit'
+
+/**
+ * The popup's payload: the built-in reference chip #1052 already minted PLUS
+ * the structured selection the quote chip mints from (the path and the line
+ * span are facts only the viewer knows — the pending chip keeps them folded
+ * into one label string).
+ */
+interface SelectionInsert extends PendingReference {
+  selection: QuoteSelection
+}
+
+/** Build the popup payload for one selection. */
+function selectionInsertOf(
+  path: string,
+  cwd: string | undefined,
+  lines: SelectionLines | undefined,
+  text: string,
+): SelectionInsert {
+  return {
+    ...buildSelectionInsert(path, cwd, lines, text),
+    selection: {
+      path,
+      ...(cwd === undefined ? {} : { cwd }),
+      ...(lines === undefined ? {} : { lines }),
+      text,
+    },
+  }
+}
 
 /** Per-file preview scroll memory. Module-level so it survives viewer
  *  remounts: the save-then-switch-to-preview reload (EditorHost #215 case B)
@@ -122,15 +153,6 @@ function editScrollOf(scope: { sessionId: string }, path: string): number {
   return editScrollMemory.get(previewScrollKey(scope, path)) ?? 0
 }
 
-/** Whether two spellings are the SAME document — byte-equal, or equal once
- *  line endings are normalized CRLF/CR → LF. Line endings are not content:
- *  CodeMirror keeps every document with `\n` endings whatever the file used,
- *  so the live document of a freshly opened CRLF file differs from the bytes
- *  it was loaded from by line endings alone. */
-function sameDocument(a: string, b: string): boolean {
-  return a === b || a.replace(/\r\n?/g, '\n') === b.replace(/\r\n?/g, '\n')
-}
-
 export function TextEditor(props: FileViewerProps) {
   const { ctx, scope, path, viewerId, content, size, largeFile, line } = props
   const [mode, setMode] = useState<ViewMode>('preview')
@@ -142,17 +164,22 @@ export function TextEditor(props: FileViewerProps) {
   const [conflict, setConflict] = useState(false)
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<CodeMirrorView | null>(null)
+  /** The landing flash's self-clear timer (one per editor; see the landing
+   *  effect and the view's unmount cleanup). */
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const savingRef = useRef(false)
   /** The mtime the draft is based on (`null` = the file did not exist yet).
    *  Seeded from the load, re-based whenever a fresh load reports a new mtime
    *  (a reload may return the SAME text — see the effect below), refreshed by
-   *  every successful save, and reset by the file-switch effect. */
+   *  every successful save, reset by the file-switch effect, and moved back to
+   *  a restored draft's own base (see restoreDraftBackup). */
   const mtimeRef = useRef<number | null>(props.mtimeMs ?? null)
   /** The bytes the save baseline belongs to: the last loaded document,
    *  advanced by every successful save (an edit-mode save never reloads, so
    *  `props.content` alone can lag behind disk). The conflict banner's reload
    *  compares the disk read against THIS — never the live draft, which is
-   *  expected to differ because it holds the unsaved edit. */
+   *  expected to differ because it holds the unsaved edit. `null` = not known:
+   *  a restored draft based on an older revision, whose bytes are not kept. */
   const savedTextRef = useRef<string | null>(content ?? null)
   /** The theme compartment of the current view (reconfigured on scheme flip). */
   const themeCompRef = useRef<CmThemeCompartment | null>(null)
@@ -258,8 +285,12 @@ export function TextEditor(props: FileViewerProps) {
    * listeners (outside mousedown, Escape, hidden tab/window, surface
    * leaving the viewport) — see selection-popup.ts.
    */
-  const selectionPopup = useSelectionPopup<PendingReference>({
+  const selectionPopup = useSelectionPopup<SelectionInsert>({
     onCommit: (insert) => {
+      // The quote chip first (a clickable, source-owned chip), then #1052's
+      // plain built-in reference chip, then bare text — every step down is one
+      // the host actually supports, never a silent no-op.
+      if (insertQuoteChip(ctx, scope.sessionId, insert.selection)) return
       insertReferenceOrText(ctx, scope.sessionId, insert)
     },
     // The surface that must stay on screen: the markdown preview container
@@ -333,6 +364,38 @@ export function TextEditor(props: FileViewerProps) {
     editScrollRef.current = editScrollOf(scope, path)
   }, [scope, path])
 
+  /**
+   * Offer this file's durable backup back to the reader (see
+   * editor-draft-backup.ts): the native tab strip's × and the Desktop shell's
+   * quit can drop the tab without a prompt, so the draft is kept in storage.
+   * Declining drops it; accepting makes it the live draft, which the normal
+   * dirty path then owns.
+   *
+   * The draft was typed against the file as it was when the backup was written,
+   * not against the bytes just loaded. Accepting therefore also restores that
+   * base mtime, so a file that moved while the tab was gone is refused
+   * (fs-conflict) instead of overwritten. The baseline text goes with it: the
+   * banner's reload would otherwise find the disk equal to this load and resolve
+   * the conflict in place, as if only the mtime had moved. An entry without a
+   * base keeps the mtime of this load.
+   */
+  const restoreDraftBackup = (): string | null => {
+    if (content === undefined) return null
+    const backup = readDraftBackup(scope.sessionId, path, content)
+    if (backup === null) return null
+    const confirmed = typeof window.confirm === 'function' ? window.confirm(t('draftRestoreConfirm')) : false
+    if (!confirmed) {
+      clearDraftBackup(scope.sessionId, path)
+      return null
+    }
+    const base = draftBackupBaseMtime(scope.sessionId, path)
+    if (base !== undefined && base !== mtimeRef.current) {
+      mtimeRef.current = base
+      savedTextRef.current = null
+    }
+    return backup
+  }
+
   // Create the CodeMirror editor once the content is loaded. The view owns
   // the document; React only tracks dirty state through the update listener
   // (the draft — the preview's text — is snapshotted from the live view on
@@ -352,8 +415,9 @@ export function TextEditor(props: FileViewerProps) {
     searchPhrasesRef.current = searchPhrases
     const gitComp = new CmGitGutterCompartment()
     gitCompRef.current = gitComp
+    const restored = restoreDraftBackup()
     const state = EditorState.create({
-      doc: content,
+      doc: restored ?? content,
       extensions: [
         CodeMirrorView.lineWrapping,
         // The change bar sits BEFORE the line numbers (VS Code's own order):
@@ -366,6 +430,10 @@ export function TextEditor(props: FileViewerProps) {
         EditorState.tabSize.of(2),
         CodeMirrorView.contentAttributes.of({ spellcheck: 'false' }),
         cmSurfaceTheme,
+        // The landing flash's range field and its per-line decorations
+        // (inert until a navigation hands this editor a quoted span).
+        quoteFlashField,
+        quoteFlashHighlight,
         themeComp.of(dark),
         // Find-in-file (Cmd/Ctrl+F): the top-pinned search panel plus the
         // upstream search keymap, registered BEFORE the editor's own keymap
@@ -378,6 +446,7 @@ export function TextEditor(props: FileViewerProps) {
         CodeMirrorView.updateListener.of((update) => {
           if (update.docChanged) {
             setDirty(true)
+            scheduleDraftBackup(scope.sessionId, path)
           }
         }),
         keymap.of([
@@ -422,11 +491,12 @@ export function TextEditor(props: FileViewerProps) {
               return
             }
             const doc = update.state.doc
+            const lines = {
+              start: doc.lineAt(sel.from).number,
+              end: doc.lineAt(sel.to).number,
+            }
             selectionPopup.show(
-              buildSelectionInsert(path, scope.cwd, {
-                start: doc.lineAt(sel.from).number,
-                end: doc.lineAt(sel.to).number,
-              }, text),
+              selectionInsertOf(path, scope.cwd, lines, text),
               rect.left - window.scrollX + (rect.right - rect.left) / 2,
               rect.top - window.scrollY,
             )
@@ -436,6 +506,19 @@ export function TextEditor(props: FileViewerProps) {
     })
     const view = new CodeMirrorView({ state, parent: host })
     viewRef.current = view
+    const releaseDraft = registerDraftSource(
+      scope.sessionId,
+      path,
+      () => viewRef.current?.state.doc.toString() ?? null,
+      () => mtimeRef.current,
+    )
+    if (restored !== null) {
+      setDirty(true)
+      setDraft(restored)
+      // Re-persist the adopted draft from the live document: the entry must
+      // not disappear just because the app quits before the next edit.
+      scheduleDraftBackup(scope.sessionId, path)
+    }
     // Edit-mode scroll memory. The native sidebar re-seats a tab while it is
     // being saved (the chip's dirty mark, the change gutter), and a scroller
     // that is detached from the document comes back with `scrollTop` 0 — the
@@ -450,11 +533,18 @@ export function TextEditor(props: FileViewerProps) {
     scroller.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       scroller.removeEventListener('scroll', onScroll)
+      // The throttled entry may still be pending: write it while this view
+      // (the only reader of its text) is still alive.
+      flushDraftBackups()
+      releaseDraft()
       view.destroy()
       viewRef.current = null
       themeCompRef.current = null
       searchPhrasesRef.current = null
       gitCompRef.current = null
+      // The flash's clear timer must not fire against a destroyed view.
+      if (flashTimerRef.current !== undefined) clearTimeout(flashTimerRef.current)
+      flashTimerRef.current = undefined
     }
     // The keymap's save() reads live refs; scope/path are stable for a
     // tab's lifetime, and the dark flip is handled by the reconfigure
@@ -594,6 +684,14 @@ export function TextEditor(props: FileViewerProps) {
     // line reference focuses; an ordinary open leaves the reader's focus where
     // it was (e.g. in the chat composer they clicked the link from).
     view.focus()
+    // A quoted span (the quote chip's click-through) flashes its lines so the
+    // reader sees WHICH part the chip carries, not just where the caret went.
+    // One timer per editor: a second navigation cancels the pending clear, and
+    // the unmount effect below does too (the field dies with the view).
+    if (props.lineEnd !== undefined && props.lineEnd > line) {
+      if (flashTimerRef.current !== undefined) clearTimeout(flashTimerRef.current)
+      flashTimerRef.current = flashQuoteLines(view, line, props.lineEnd)
+    }
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const block = view.lineBlockAt(target)
@@ -612,7 +710,7 @@ export function TextEditor(props: FileViewerProps) {
     // The reveal reads the live view ref; `markdown`/`html` are derived from
     // `viewerId`, which the view-creation effect already keys on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content, path, line, mode, props.onLineConsumed])
+  }, [content, path, line, mode, props.onLineConsumed, props.lineEnd])
 
   // Scheme flip: re-theme in place (the compartment holds only the
   // scheme-dependent extensions; everything else is untouched).
@@ -731,7 +829,8 @@ export function TextEditor(props: FileViewerProps) {
     if (view === null || savingRef.current) return
     // The bytes this request writes: the same string becomes the baseline text
     // once the host accepts it (the draft may keep changing while in flight).
-    const text = view.state.doc.toString()
+    const sentDoc = view.state.doc
+    const text = sentDoc.toString()
     savingRef.current = true
     setSaveState('saving')
     // Optimistic concurrency: the draft was based on the bytes read at
@@ -740,20 +839,42 @@ export function TextEditor(props: FileViewerProps) {
     // external editor). `null` = the file did not exist when loaded.
     api.fsWrite(scope, path, text, mtimeRef.current ?? null).then((result) => {
       savingRef.current = false
+      // A file switch during the write destroys `view` and re-seats viewRef on
+      // the NEW document. This result then belongs to the OLD file: write
+      // nothing else, or A's text / save state / mtime leak into B. The save
+      // lock is already released above so B can still save.
+      if (viewRef.current !== view) return
       // Adopt the fresh baseline the host reports (absent on a stat failure —
       // keep the old one, the next save just re-checks).
       if (typeof result.mtimeMs === 'number') mtimeRef.current = result.mtimeMs
       savedTextRef.current = text
-      setDraft(null)
-      setDirty(false)
       setConflict(false)
-      setSaveState('saved')
+      // Keystrokes during the write are NOT the bytes on disk: keep the tab
+      // dirty and its durable backup, or the next close/quit drops them.
+      // CM's `Text` is immutable: an unchanged doc is the same object, so
+      // `text` can be reused instead of stringifying the document again.
+      const liveDoc = view.state.doc
+      const live = liveDoc === sentDoc ? text : liveDoc.toString()
+      if (live !== text) {
+        setDraft(live)
+        setSaveState('idle')
+      } else {
+        setDraft(null)
+        setDirty(false)
+        setSaveState('saved')
+        // Saved: nothing is unsaved any more, so the durable backup must not
+        // offer itself back on the next open.
+        clearDraftBackup(scope.sessionId, path)
+      }
       // The saved bytes are a new revision of the uncommitted diff: re-read
       // the change set (the file's XY status code usually stays the same, so
       // the status store alone would never wake the gutter up again).
       setGitRevision(value => value + 1)
     }).catch((error: unknown) => {
       savingRef.current = false
+      // Same expiry guard as the success path: an error from the OLD file must
+      // not raise B's conflict banner or mark B's save failed.
+      if (viewRef.current !== view) return
       if (error instanceof SidebarApiError && error.code === 'fs-conflict') {
         setConflict(true)
         setSaveState('idle')
@@ -816,17 +937,14 @@ export function TextEditor(props: FileViewerProps) {
     requestAnimationFrame(() => { restoringRef.current = false })
   }, [mode, previewMdText])
 
-  /** The preview source with local image destinations rewritten to absolute
-   *  media URLs (see {@link rewriteLocalImageUrls}) and the local link
-   *  destinations prepared for the host delegate (see
-   *  {@link rewriteLocalMarkdownLinks}; the split renderer runs the same two
-   *  passes per markdown run, and both are idempotent). */
+  /** The preview source with the local link destinations prepared for the
+   *  host delegate (see {@link rewriteLocalMarkdownLinks}; the split renderer
+   *  runs the same pass per markdown run, and it is idempotent). Local IMAGE
+   *  destinations stay as authored: the owner's `pathImages` vocabulary
+   *  resolves them at render time, which is the only shape that also works
+   *  from the desktop shell's `dsh-app://` page (see markdown-images.ts). */
   const previewText = markdown
-    ? rewriteLocalMarkdownLinks(
-      rewriteLocalImageUrls(previewMdText, scope, path, hostTransportBase()),
-      path,
-      scope.cwd,
-    )
+    ? rewriteLocalMarkdownLinks(previewMdText, path, scope.cwd)
     : previewMdText
   /** md/mermaid block split for the preview (mermaid fences lift out). Split
    *  only in preview mode: edit-mode keystrokes must not re-scan the source. */
@@ -836,9 +954,8 @@ export function TextEditor(props: FileViewerProps) {
   )
   /** Raw-HTML analysis (block runs lifted out + inline gate). Non-null for
    *  every markdown preview, so the render below always takes the split
-   *  renderer — its markdown runs rewrite local image destinations internally
-   *  (see MarkdownHtml.tsx). The legacy single-pass branches (fed the
-   *  pre-rewritten `previewText`) are dead in the current wiring. */
+   *  renderer. The legacy single-pass branches are dead in the current
+   *  wiring. */
   const htmlInfo = useMemo(
     () => (markdown && mode === 'preview' ? analyzeMarkdownHtml(previewMdText) : null),
     [markdown, mode, previewMdText],
@@ -851,11 +968,19 @@ export function TextEditor(props: FileViewerProps) {
     [htmlInfo, mdBlocks],
   )
   /** The media context for the split renderer (local-src rewriting inside
-   *  sanitized HTML). Memoized on primitives: MarkdownDocument sanitizes per
-   *  `media` identity, so a fresh object per render would re-sanitize every
-   *  keystroke. */
+   *  sanitized HTML, plus the owner's `pathImages` vocabulary for markdown
+   *  runs). The PAGE base is load-bearing: in the desktop shell the transport
+   *  origin is a different site and its media request would be rejected by the
+   *  Connection fence (see markdown-images.ts). Memoized on primitives:
+   *  MarkdownDocument sanitizes per `media` identity, so a fresh object per
+   *  render would re-sanitize every keystroke. */
   const htmlMedia = useMemo<MarkdownHtmlMedia>(
-    () => ({ scope, path, baseUrl: hostTransportBase() }),
+    () => ({
+      scope,
+      path,
+      baseUrl: hostHttpBase(),
+      pathImages: createMarkdownPathImages(scope, path, hostHttpBase()),
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scope.sessionId, scope.cwd, path],
   )
@@ -894,7 +1019,7 @@ export function TextEditor(props: FileViewerProps) {
     const rect = sel.getRangeAt(0).getBoundingClientRect()
     const lines = linesOfSelection(mdText, text)
     selectionPopup.show(
-      buildSelectionInsert(path, scope.cwd, lines ?? undefined, text),
+      selectionInsertOf(path, scope.cwd, lines ?? undefined, text),
       rect.left + rect.width / 2,
       rect.top,
     )
@@ -1105,8 +1230,8 @@ export function TextEditor(props: FileViewerProps) {
             {htmlInfo !== null
               ? <MarkdownDocument info={htmlInfo} media={htmlMedia} codeLabels={codeLabels} />
               : hasMermaid
-                ? <LazyMermaidMarkdown text={previewText} codeLabels={codeLabels} />
-                : <MarkdownText {...markdownTextProps(previewText, codeLabels)} />}
+                ? <LazyMermaidMarkdown text={previewText} codeLabels={codeLabels} pathImages={htmlMedia.pathImages} />
+                : <MarkdownText {...markdownTextProps(previewText, codeLabels, htmlMedia.pathImages)} />}
           </MarkdownDelegateProvider>
         </div>
       )}
@@ -1119,17 +1244,17 @@ export function TextEditor(props: FileViewerProps) {
             onUnlock={() => { setLocalUnlock(true) }}
             onRestore={() => { setLocalUnlock(false) }}
           />
-          {/* Route-src (never srcdoc — a srcdoc frame inherits the parent
-              origin when unsandboxed; the route URL keeps the frame
-              cross-origin by construction). The preview shows the SAVED
-              file; the draft is only visible in edit mode. */}
-          <iframe
+          {/* Route-src on a normal web page; in the desktop shell with the
+              sandbox ON the frame is a self-contained sandboxed blob (the
+              shell rejects an opaque subframe's dsh-app requests — see
+              HtmlPreviewFrame / html-preview-inline.ts). Never srcdoc: an
+              unsandboxed srcdoc frame inherits the parent origin. The preview
+              shows the SAVED file; the draft is only visible in edit mode. */}
+          <HtmlPreviewFrame
             className={css.editorHtml}
             src={htmlUrl(scope, path)}
-            sandbox={htmlNoSandbox ? undefined : HTML_IFRAME_SANDBOX}
-            referrerPolicy="no-referrer"
-            allow=""
             title={path}
+            sandboxed={!htmlNoSandbox}
           />
         </>
       )}
