@@ -220,6 +220,8 @@ export const ru: Record<string, string> = {
   gitMergeChanges: 'Изменения слияния',
   gitStagedChanges: 'Изменения в индексе',
   gitMoreActions: 'Другие действия',
+  gitRepoSearchPlaceholder: 'Поиск репозиториев…',
+  gitRepoSearchEmpty: 'Нет подходящих репозиториев',
   gitRepoCount: '{count} репозиториев',
   gitRepository: 'Репозиторий',
   gitDetached: 'Отсоединённый HEAD',

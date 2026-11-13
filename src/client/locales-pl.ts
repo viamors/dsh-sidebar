@@ -226,6 +226,8 @@ export const pl: Record<string, string> = {
   gitMergeChanges: 'Zmiany scalania',
   gitStagedChanges: 'Zmiany w indeksie',
   gitMoreActions: 'Więcej działań',
+  gitRepoSearchPlaceholder: 'Szukaj repozytoriów…',
+  gitRepoSearchEmpty: 'Brak pasujących repozytoriów',
   gitRepoCount: '{count} repozytoriów',
   gitRepository: 'Repozytorium',
   gitDetached: 'Odłączony HEAD',

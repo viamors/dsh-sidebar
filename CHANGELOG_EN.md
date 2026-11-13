@@ -4,6 +4,14 @@
 >
 > 📝 The Chinese [CHANGELOG](./CHANGELOG.md) is the authoritative, item-by-item record; this file carries the English summaries and has historically lagged behind it. Where the two disagree, the Chinese one is current.
 
+### v1.6.0 (@vimors/dsh-sidebar Fork)
+
+- 🔍 **Fuzzy search in the multi-repository switcher**: the collapsed list now carries a search box that filters on **repo name or absolute path**, case-insensitively, with all whitespace-separated terms required. An empty state is shown when nothing matches.
+  - The box is focused on expand; **Enter** picks the first match and collapses, **Esc** clears the query, and any pick clears and collapses it.
+  - Filtering uses the `hidden` attribute instead of unmounting: every `data-scm-repo` stays in the DOM, so upstream tests, the ⋯ → Repository submenu and external integrations keep working.
+  - New i18n keys `gitRepoSearchPlaceholder` / `gitRepoSearchEmpty`, synced across all 21 dictionaries.
+- 🧪 Verified: typecheck / lint clean; 3 new search-behavior tests; full vitest 3596 passed (2 load-only IO flakes green in isolation 41/41); search features baked into the bundle.
+
 ### v1.5.0 (@vimors/dsh-sidebar Fork)
 
 > Enhanced fork based on upstream **v0.32.1 / DSH 0.2.2-rc.2**, published as `@vimors/dsh-sidebar`.

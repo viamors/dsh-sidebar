@@ -458,6 +458,11 @@ export function GitLens(props: GitLensProps) {
   const [changesOpen, setChangesOpen] = useState(true)
   /** The multi-repo switcher's <details> element (collapses after a pick). */
   const repoSwitcherRef = useRef<HTMLDetailsElement>(null)
+  /** The fuzzy search box inside the list (focused on expand, cleared on pick). */
+  const repoSearchRef = useRef<HTMLInputElement>(null)
+  /** Fuzzy query over repository names AND absolute paths (case-insensitive,
+   *  whitespace-separated terms all have to match — see repoMatch below). */
+  const [repoQuery, setRepoQuery] = useState('')
   const [graphOpen, setGraphOpen] = useState(true)
   /** The file filter over the change list (a case-insensitive path substring).
    *  Typing NARROWS the groups in place — the same rows, their directories
@@ -1137,6 +1142,24 @@ export function GitLens(props: GitLensProps) {
     </div>
   )
 
+  /** Fuzzy match: every whitespace-separated term must appear in the repo's
+   *  name OR its absolute path (case-insensitive). An empty query matches all,
+   *  which keeps the unfiltered DOM contract intact. */
+  const repoMatch = useCallback((root: string): boolean => {
+    const terms = repoQuery.trim().toLowerCase().split(/\s+/).filter(term => term !== '')
+    if (terms.length === 0) return true
+    const haystack = `${baseName(root)} ${root}`.toLowerCase()
+    return terms.every(term => haystack.includes(term))
+  }, [repoQuery])
+
+  /** Pick one root: same scope re-pin as the ⋯ → Repository submenu, then
+   *  collapse the list and clear the query for the next open. */
+  const pickRepo = (root: string): void => {
+    chooseRepo(root)
+    setRepoQuery('')
+    if (repoSwitcherRef.current !== null) repoSwitcherRef.current.open = false
+  }
+
   const renderGroup = (id: string, label: string, rows: readonly GitStatusEntry[], nodes: readonly ChangeNode[], staged: boolean, merge = false): ReactNode => {
     if (rows.length === 0) return null
     const key = `group:${id}`
@@ -1187,13 +1210,22 @@ export function GitLens(props: GitLensProps) {
             sprawled across (and horizontally scrolled) the whole pane as soon
             as a container held a dozen projects. It is now a native
             <details>: one summary line — the active checkout plus the total —
-            and, when opened, a bounded vertical list that scrolls. The chips
-            stay in the DOM (and keep data-scm-repo) so the ⋯ → Repository
-            submenu, the tests and any external integration still see them. */}
+            and, when opened, a bounded vertical list with a fuzzy search box.
+            The chips stay in the DOM (hidden, not unmounted, when filtered out)
+            and keep data-scm-repo so the ⋯ → Repository submenu, the tests
+            and any external integration still see them. */}
         {isRepo && repoChoices.length > 1 && (
           <details
             className={css.repoSwitcher} data-scm-repos role="group"
             aria-label={t('gitRepository')} ref={repoSwitcherRef}
+            onToggle={(event) => {
+              if ((event.currentTarget as HTMLDetailsElement).open) {
+                // Focus once the browser has laid out the newly visible input.
+                requestAnimationFrame(() => { repoSearchRef.current?.focus() })
+              } else {
+                setRepoQuery('')
+              }
+            }}
           >
             <summary className={css.repoSummary} data-scm-repos-summary>
               <span className={css.chevron} aria-hidden="true"><IconChevronRightOutlineRegular size={12} /></span>
@@ -1202,21 +1234,44 @@ export function GitLens(props: GitLensProps) {
               </span>
               <span className={css.repoCount}>{t('gitRepoCount', { count: repoChoices.length })}</span>
             </summary>
+            <div className={css.repoSearchRow} data-scm-repo-search>
+              <span className={css.filterIcon} aria-hidden="true"><IconSearchOutlineRegular size={13} /></span>
+              <input
+                ref={repoSearchRef}
+                className={css.repoSearchInput}
+                type="search"
+                value={repoQuery}
+                placeholder={t('gitRepoSearchPlaceholder')}
+                aria-label={t('gitRepoSearchPlaceholder')}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(event) => { setRepoQuery(event.target.value) }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    if (repoQuery !== '') { event.stopPropagation(); setRepoQuery('') }
+                    return
+                  }
+                  if (event.key !== 'Enter') return
+                  const first = repoChoices.find(root => repoMatch(root))
+                  if (first !== undefined) { event.preventDefault(); pickRepo(first) }
+                }}
+              />
+            </div>
             <div className={css.repoList} data-scm-repo-list>
               {repoChoices.map(root => {
                 const isActive = sameRepoRoot(root, repoRoot ?? snapshot?.root)
                 return (
                   <button key={root} type="button" className={css.repoChip} data-scm-repo={root}
+                    hidden={!repoMatch(root)}
                     data-active={isActive ? 'true' : undefined} aria-pressed={isActive} title={root}
-                    disabled={busy || suggesting} onClick={() => {
-                      chooseRepo(root)
-                      // Collapse after a pick so the list never covers the change groups.
-                      if (repoSwitcherRef.current !== null) repoSwitcherRef.current.open = false
-                    }}>
+                    disabled={busy || suggesting} onClick={() => { pickRepo(root) }}>
                     {baseName(root)}
                   </button>
                 )
               })}
+              {repoChoices.every(root => !repoMatch(root)) && (
+                <span className={css.repoSearchEmpty} data-scm-repo-empty>{t('gitRepoSearchEmpty')}</span>
+              )}
             </div>
           </details>
         )}

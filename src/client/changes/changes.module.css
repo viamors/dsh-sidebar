@@ -105,6 +105,41 @@
   font: var(--dsw-font-xxxs-11);
   white-space: nowrap;
 }
+/* Fork: with dozens of child repositories even a scrolling list is slow to
+   pick from, so the expanded switcher carries a fuzzy search box. Hidden chips
+   stay mounted (display:none) — data-scm-repo consumers see the full set. */
+.repoSearchRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 3px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+.repoSearchRow:focus-within { border-color: var(--dsw-alias-state-business-primary); }
+.repoSearchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxxs-11);
+  outline: none;
+}
+.repoSearchInput::placeholder { color: var(--dsw-alias-label-dimmed); }
+.repoSearchInput::-webkit-search-cancel-button { cursor: pointer; }
+.repoSearchEmpty {
+  display: block;
+  padding: 4px 8px;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxxs-11);
+  text-align: center;
+}
+.repoChip[hidden] { display: none; }
 .repoList {
   display: flex;
   flex-direction: column;

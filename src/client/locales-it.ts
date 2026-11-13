@@ -215,6 +215,8 @@ export const it: Record<string, string> = {
   gitMergeChanges: 'Modifiche di merge',
   gitStagedChanges: 'Modifiche preparate',
   gitMoreActions: 'Altre azioni',
+  gitRepoSearchPlaceholder: 'Cerca repository…',
+  gitRepoSearchEmpty: 'Nessun repository corrispondente',
   gitRepoCount: '{count} repository',
   gitRepository: 'Repository',
   gitDetached: 'HEAD scollegata',

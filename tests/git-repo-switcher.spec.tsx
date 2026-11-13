@@ -138,3 +138,57 @@ it('collapses again after picking a repository', async () => {
   expect(details.open).toBe(false)
   expect(chips(view.container)[1]!.getAttribute('data-active')).toBe('true')
 })
+
+// ── Fork: fuzzy search inside the collapsed switcher ────────────────────────
+
+/** Type into the switcher's search box. React 18 listens to `input`. */
+async function search(view: { container: HTMLElement }, value: string): Promise<void> {
+  const input = view.container.querySelector<HTMLInputElement>('[data-scm-repo-search] input')!
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    setter.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+const visibleChips = (container: HTMLElement): HTMLButtonElement[] =>
+  chips(container).filter(button => !button.hidden)
+
+it('filters repositories by name or path, case-insensitively, and keeps every chip mounted', async () => {
+  const view = await mount({ sessionId: 'scm-repos-search' })
+  const { container } = view
+  // The DOM contract: filtering HIDES chips, it never unmounts them.
+  expect(chips(container)).toHaveLength(3)
+  await search(view, 'ADMIN')
+  expect(visibleChips(container).map(b => b.dataset.scmRepo)).toEqual([ADMIN])
+  expect(chips(container)).toHaveLength(3)
+  // Absolute path is searchable too (e.g. typing the parent folder).
+  await search(view, 'work-docs')
+  expect(visibleChips(container).map(b => b.dataset.scmRepo)).toEqual([DOCS])
+})
+
+it('matches all whitespace-separated terms, shows an empty state, and clears on Escape', async () => {
+  const view = await mount({ sessionId: 'scm-repos-search-terms' })
+  const { container } = view
+  await search(view, 'work admin')
+  expect(visibleChips(container).map(b => b.dataset.scmRepo)).toEqual([ADMIN])
+  await search(view, 'nothing-matches')
+  expect(visibleChips(container)).toEqual([])
+  expect(container.querySelector('[data-scm-repo-empty]')!.textContent).toBeTruthy()
+  const input = container.querySelector<HTMLInputElement>('[data-scm-repo-search] input')!
+  await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+  expect(input.value).toBe('')
+  expect(visibleChips(container)).toHaveLength(3)
+})
+
+it('Enter picks the first matching repository and collapses the list', async () => {
+  const view = await mount({ sessionId: 'scm-repos-search-enter' })
+  const details = view.container.querySelector<HTMLDetailsElement>('details[data-scm-repos]')!
+  await act(async () => { details.open = true })
+  await search(view, 'docs') // matches work-docs only
+  const input = view.container.querySelector<HTMLInputElement>('[data-scm-repo-search] input')!
+  await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+  await flush()
+  await flush()
+  expect(view.scopes.at(-1)?.repoRoot).toBe(DOCS)
+  expect(details.open).toBe(false)
+})

@@ -224,6 +224,8 @@ export const tr: Record<string, string> = {
   gitMergeChanges: 'Birleştirme değişiklikleri',
   gitStagedChanges: 'Sahnelenmiş değişiklikler',
   gitMoreActions: 'Diğer işlemler',
+  gitRepoSearchPlaceholder: 'Depo ara…',
+  gitRepoSearchEmpty: 'Eşleşen depo yok',
   gitRepoCount: '{count} depo',
   gitRepository: 'Depo',
   gitDetached: 'Ayrılmış HEAD',

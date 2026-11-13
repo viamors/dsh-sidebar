@@ -224,6 +224,8 @@ export const vi: Record<string, string> = {
   gitMergeChanges: 'Thay đổi hợp nhất',
   gitStagedChanges: 'Thay đổi đã stage',
   gitMoreActions: 'Thao tác khác',
+  gitRepoSearchPlaceholder: 'Tìm kho lưu trữ…',
+  gitRepoSearchEmpty: 'Không có kho lưu trữ phù hợp',
   gitRepoCount: '{count} kho lưu trữ',
   gitRepository: 'Kho lưu trữ',
   gitDetached: 'HEAD tách rời',

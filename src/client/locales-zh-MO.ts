@@ -239,6 +239,8 @@ export const zhMO: Record<string, string> = {
   gitMergeChanges: '合併變更',
   gitStagedChanges: '暫存的變更',
   gitMoreActions: '更多操作',
+  gitRepoSearchPlaceholder: '搜尋倉庫…',
+  gitRepoSearchEmpty: '沒有符合的倉庫',
   gitRepoCount: '{count} 個倉庫',
   gitRepository: '倉庫',
   gitDetached: '游離 HEAD',

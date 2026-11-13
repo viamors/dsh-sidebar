@@ -44,14 +44,14 @@ dsh plugin --profile web add @vimors/dsh-sidebar
 
 Then **hard-refresh the browser** (Cmd/Ctrl+Shift+R). Requires DSH **0.2.2-rc.2+**.
 
-> **Compatibility warning — match the plugin to the host line.** As of 2026-11-12, DSH's npm `latest` is **0.2.2-rc.1** and `next` is **0.2.2-rc.2**. **`@vimors/dsh-sidebar@1.5.0` requires DSH 0.2.2-rc.2+**; hosts on **0.2.2-rc.1** must pin `dsh-better-sidebar@0.32.0`. Hosts on the 0.2.1 line (**0.2.1-rc.1 ~ rc.5**) must pin `dsh-better-sidebar@0.28.2` — v0.29.0 was never published to npm. DSH 0.2.1-alpha.5 users must pin `dsh-better-sidebar@0.28.0-alpha.0`, and hosts still on **0.2.0-rc.2** must pin `dsh-better-sidebar@0.26.1`. A 0.x caret never spans a minor version, so one plugin build cannot serve two host lines. The marketplace installer picks the plugin's `latest` regardless of host version, so an old host gets a version-rejection error — upgrade the host or pin the version explicitly. The two packages' `latest` tags are independent.
+> **Compatibility warning — match the plugin to the host line.** As of 2026-11-12, DSH's npm `latest` is **0.2.2-rc.1** and `next` is **0.2.2-rc.2**. **`@vimors/dsh-sidebar@1.6.0` requires DSH 0.2.2-rc.2+**; hosts on **0.2.2-rc.1** must pin `dsh-better-sidebar@0.32.0`. Hosts on the 0.2.1 line (**0.2.1-rc.1 ~ rc.5**) must pin `dsh-better-sidebar@0.28.2` — v0.29.0 was never published to npm. DSH 0.2.1-alpha.5 users must pin `dsh-better-sidebar@0.28.0-alpha.0`, and hosts still on **0.2.0-rc.2** must pin `dsh-better-sidebar@0.26.1`. A 0.x caret never spans a minor version, so one plugin build cannot serve two host lines. The marketplace installer picks the plugin's `latest` regardless of host version, so an old host gets a version-rejection error — upgrade the host or pin the version explicitly. The two packages' `latest` tags are independent.
 
 <details>
 <summary><b>Pick the plugin version for your DSH version</b></summary>
 
 | Your DSH version | Install command |
 | --- | --- |
-| **0.2.2-rc.2+** | `dsh plugin --profile web add @vimors/dsh-sidebar@1.5.0` (this fork) |
+| **0.2.2-rc.2+** | `dsh plugin --profile web add @vimors/dsh-sidebar@1.6.0` (this fork) |
 | **0.2.2-rc.1** | `dsh plugin --profile web add dsh-better-sidebar@0.32.0` (official package) |
 | **0.2.1-rc.1 ~ 0.2.1-rc.5** | `dsh plugin --profile web add dsh-better-sidebar@0.28.2` (official package) |
 | **0.2.1-alpha.5** | `dsh plugin --profile web add dsh-better-sidebar@0.28.0-alpha.0` |
@@ -72,7 +72,7 @@ Always pin **exact versions** for older releases (`latest` moves forward with ea
 
 ```text
 Install the dsh-better-sidebar plugin (a sidebar workbench for DSH):
-1. Confirm DSH is 0.2.2-rc.2 or newer, then run dsh plugin --profile web add @vimors/dsh-sidebar@1.5.0
+1. Confirm DSH is 0.2.2-rc.2 or newer, then run dsh plugin --profile web add @vimors/dsh-sidebar@1.6.0
 2. Remind me to hard-refresh the browser (Cmd/Ctrl+Shift+R) afterwards
 If something fails, check the FAQ table in https://github.com/omdsh-dev/DSH-better-sidebar README first.
 ```
@@ -95,7 +95,7 @@ If something fails, check the FAQ table in https://github.com/omdsh-dev/DSH-bett
 | **Two sidebars** on the page | Double mounting. Remove the legacy manual mount line (`- insert: ... better-sidebar ...`) from `~/.dsh/profiles/web/cordis.patch.yml`; aggregate packages mounting this package under a different id are auto-yielded, no action needed. |
 | Settings values gone after upgrade | Since DSH 0.1.7, preferences live on this plugin's mount row in the profile (default entry id `better-sidebar`). The plugin migrates your old `settings.yaml` values once on first start and never overwrites newer values. |
 | Terminal unavailable | Terminals are provided by **DSH itself** (this plugin ships no PTY) — see DSH docs; "host provides no terminal capability" in the bottom terminal means this deployment has no terminal controller mounted. |
-| `dsh: command not found` | Install DSH first; or use `npx -y --package @deepseek-ai/dsh@0.2.2-rc.2 dsh plugin --profile web add @vimors/dsh-sidebar@1.5.0`. |
+| `dsh: command not found` | Install DSH first; or use `npx -y --package @deepseek-ai/dsh@0.2.2-rc.2 dsh plugin --profile web add @vimors/dsh-sidebar@1.6.0`. |
 
 </details>
 

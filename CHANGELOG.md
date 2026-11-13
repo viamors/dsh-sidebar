@@ -2,6 +2,14 @@
 
 > 本文档收录 dsh-better-sidebar 的完整发布历史（最新版摘要见 [README](README_ZH.md)；同步发布于 [GitHub Releases](https://github.com/omdsh-dev/DSH-better-sidebar/releases)）。
 
+### v1.6.0（@vimors/dsh-sidebar Fork）
+
+- 🔍 **多仓库切换器支持模糊搜索**：折叠列表顶部新增搜索框，输入即按**仓库名或绝对路径**过滤，大小写不敏感，空格分隔多个关键词需全部命中；无匹配时显示提示。
+  - 展开时自动聚焦搜索框；**回车**选中第一个匹配项并收起，**Esc** 清空筛选；选中任一仓库后自动清空查询并收起。
+  - 过滤用 `hidden` 属性而非卸载节点：`data-scm-repo` 始终保留在 DOM 中，官方测试、「⋯ → 仓库」子菜单与外部集成不受影响。
+  - 新增 `gitRepoSearchPlaceholder` / `gitRepoSearchEmpty` 两个 i18n key，已同步全部 21 份词典。
+- 🧪 验证：typecheck / lint 0 error；新增 3 条搜索行为测试（名称与路径过滤、多关键词与空结果、回车选中）；全量 vitest 3596 passed（2 个失败均为 `fs-operations` / `git-graph` 满载 IO flake，隔离重跑 41/41 全绿）；搜索特性已烘焙进产物。
+
 ### v1.5.0（@vimors/dsh-sidebar Fork）
 
 > 基于上游 **v0.32.1 / DSH 0.2.2-rc.2** 的增强 Fork，包名 `@vimors/dsh-sidebar`。

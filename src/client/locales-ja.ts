@@ -224,6 +224,8 @@ export const ja: Record<string, string> = {
   gitMergeChanges: 'マージの変更',
   gitStagedChanges: 'ステージ済みの変更',
   gitMoreActions: 'その他の操作',
+  gitRepoSearchPlaceholder: 'リポジトリを検索…',
+  gitRepoSearchEmpty: '一致するリポジトリなし',
   gitRepoCount: '{count} 件のリポジトリ',
   gitRepository: 'リポジトリ',
   gitDetached: '切り離された HEAD',

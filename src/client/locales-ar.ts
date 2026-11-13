@@ -225,6 +225,8 @@ export const ar: Record<string, string> = {
   gitMergeChanges: 'تغييرات الدمج',
   gitStagedChanges: 'التغييرات المُدرجة',
   gitMoreActions: 'المزيد من الإجراءات',
+  gitRepoSearchPlaceholder: 'ابحث في المستودعات…',
+  gitRepoSearchEmpty: 'لا مستودعات مطابقة',
   gitRepoCount: '{count} مستودعات',
   gitRepository: 'المستودع',
   gitDetached: 'HEAD منفصل',
