@@ -4,6 +4,14 @@
 >
 > 📝 The Chinese [CHANGELOG](./CHANGELOG.md) is the authoritative, item-by-item record; this file carries the English summaries and has historically lagged behind it. Where the two disagree, the Chinese one is current.
 
+### v1.5.0 (@vimors/dsh-sidebar Fork)
+
+> Enhanced fork based on upstream **v0.32.1 / DSH 0.2.2-rc.2**, published as `@vimors/dsh-sidebar`.
+
+- 🧩 **Merged upstream v0.32.1**: DSH 0.2.2-rc.2 adaptation (host `anchorPoint` menu positioning, Agent Team `isEnabled` task writes, 14 peers raised to `^0.2.2-rc.2`, new `dsh-error` peer, Cordis 4.1.0) plus illustrated plugin-detail pages (DETAIL docs and 3 SVGs).
+- 🛠 **Kept every fork enhancement**: collapsible multi-repo switcher, WSL2 native git bridge with UNC/DrvFs hardening, GitLens change filter / tree totals / Reveal in File Tree, TabBar copy actions and quick buttons, Locate Active File, editor context menu and Markdown reference-link copies.
+- 🧪 Verified: typecheck / lint clean; full vitest green; client and registry bundle ids separated; host import OK.
+
 ### v1.4.0 (@vimors/dsh-sidebar Fork)
 
 - 🗂 **The multi-repository switcher is collapsible again.** Upstream (since v0.30.0) laid every child repository out as a flat row of chips; with a dozen projects it filled the strip and forced sideways scrolling. It now shows a single line — the active checkout plus the total — and expands into a **bounded vertical scrolling list** (max 208px). Picking a repository collapses it again so the change groups are never covered.
@@ -32,6 +40,17 @@
 - 📝 **Editor content-area context menu** — right-click inside the code surface for copy paths, the Markdown link, reveal-in-tree and reveal-in-Explorer without moving to the tab strip.
 - 🪟 **WSL2 native git delegation and workspace hardening (this fork's founding feature)** — with DSH on Windows opening projects inside a WSL2 distribution, git deliberately runs inside the distro (persistent bridge: ~190ms → ~15ms per call); the file tree, Git status, diffs, previews and "open with" all operate on the distro's own files, with UNC/DrvFs spellings kept correct across address resolution, reveal and external opens.
 - 🛠 **Merged upstream v0.31.1** — the DSH 0.2.2 baseline (peers `^0.2.2-rc.1`), the sandboxed-iframe Mermaid renderer, editor draft backups, side-chat image input, clickable quote chips, the Git sub-repository switcher and a dozen fixes; this fork's enhancements were re-ported onto the new baseline and pass the full gates.
+
+### v0.32.1
+
+- 🧩 **DSH 0.2.2-rc.2 support**: the plugin baseline moves to the newest 0.2.2 RC and follows that host's client contract and team service.
+  - **Menus and the open-with submenu are now positioned by the host**: DSH 0.2.2-rc.2 uses CSS-anchored menus and portals submenus into their own layer; the plugin switches to the new `anchorPoint` API and drops its own submenu flip workaround, so it no longer fights the host's placement.
+  - **Team task-board writes move to the built-in Agent Team service**: the experimental package became `@deepseek-ai/dsh-agent-team` in the base composition, enabled per session; the plugin checks `isEnabled` and keeps reading the `agentTeam` projection plus the subagent roster.
+  - **Dependency and installer sync**: all 14 DSH peer floors move to `^0.2.2-rc.2`; dev pins follow, including the newly transitive `dsh-error` peer; Cordis 4.1.0 / include 1.1.0.
+  - **Support line**: DSH 0.2.2-rc.2+ uses this release; hosts still on **0.2.2-rc.1** should pin **v0.32.0**.
+  - 🖼 **The plugin page now carries illustrated details**: DSH's Plugins page shows an overview of the right sidebar and a per-conversation isolation diagram, with numbered notes for files, editor, changes, tasks, and side chat; each `locale/*.json` declares `meta.detail` pointing at `detail/DETAIL*.md`, and the SVGs ship in the npm package.
+  - 🧪 Tests: open-with/submenu specs now locate the portaled child card by its own marker; team-route specs cover the three `isEnabled` branches; baseline/peer guards updated; `tests/plugin-detail.spec.ts` and the tarball detail-asset assertions are new; the real 0.2.2-rc.2 + Chromium mount smoke is recorded in the adaptation note.
+
 
 ### v0.32.0
 

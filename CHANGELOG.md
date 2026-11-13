@@ -2,6 +2,14 @@
 
 > 本文档收录 dsh-better-sidebar 的完整发布历史（最新版摘要见 [README](README_ZH.md)；同步发布于 [GitHub Releases](https://github.com/omdsh-dev/DSH-better-sidebar/releases)）。
 
+### v1.5.0（@vimors/dsh-sidebar Fork）
+
+> 基于上游 **v0.32.1 / DSH 0.2.2-rc.2** 的增强 Fork，包名 `@vimors/dsh-sidebar`。
+
+- 🧩 **合并上游 v0.32.1**：适配 DSH 0.2.2-rc.2（右键菜单与「打开方式」子菜单改由宿主 `anchorPoint` 定位、团队任务板写入迁移到内置 Agent Team 服务 `isEnabled`、14 条 peer 下限抬到 `^0.2.2-rc.2`、新增 `dsh-error` 传递 peer、Cordis 4.1.0），并补上插件页图文详情（DETAIL 文档与 3 张 SVG）。
+- 🛠 **保留本 Fork 全部增强**：折叠式多仓库切换器、WSL2 原生 git 持久桥接与 UNC/DrvFs 路径加固、GitLens 文件筛选 / tree totals /「在文件树中定位」、TabBar 复制路径与快捷按钮、文件树「定位当前打开的文件」、编辑器右键菜单与 Markdown 引用链接复制。
+- 🧪 验证：typecheck / lint 0 error；全量 vitest 通过；客户端与 registry bundle 注册 id 分离；宿主 import 正常。
+
 ### v1.4.0（@vimors/dsh-sidebar Fork）
 
 - 🗂 **多仓库切换器改回折叠式**：上游自 v0.30.0 起把容器内每个子仓库平铺成一排胶囊，项目一多就横向铺满、难以选择。现在默认只显示一行「当前仓库 · N 个」，点击展开为**竖向有界滚动列表**（最大 208px），选中任一项后自动收起，不会遮住下方的变更列表。
@@ -30,6 +38,17 @@
 - 📝 **编辑器内容区右键菜单**：代码编辑区内直接右键即可 复制相对/绝对地址、复制 Markdown 链接、在文件树中定位、在资源管理器中定位，不用再把鼠标挪到顶部标签条。
 - 🪟 **WSL2 原生 git 委派与工作区增强（本 Fork 起始特性）**：Windows 宿主上打开 WSL2 发行版内的项目时，git 有意在发行版内部执行（持久桥接，单调用 ~190ms → ~15ms），文件树/Git 状态/diff/预览与「打开方式」全部作用于发行版自己的文件；UNC 与 DrvFs 路径在地址解析、reveal 与外链打开处全链路保持正确拼写。
 - 🛠 **合并上游 v0.31.1**：吸收官方 DSH 0.2.2 基线（peer `^0.2.2-rc.1`）、Mermaid 沙箱 iframe 渲染、编辑器草稿备份、侧边对话图片输入、可点击引用 chip、Git 子仓库切换器与十余项修复——本 Fork 的增强全部在新基线上重新移植并通过全量门禁。
+
+### v0.32.1
+
+- 🧩 **适配 DSH 0.2.2-rc.2**：插件基线抬到 0.2.2 线的最新 RC，同时跟上这一版宿主的客户端契约与团队服务。
+  - **右键菜单与「打开方式」子菜单交给宿主定位**：DSH 0.2.2-rc.2 把菜单改为 CSS 锚点定位、子菜单改为独立浮层，插件改用新的 `anchorPoint`；原先自己改写子菜单左右/上下翻转的 workaround 已删除，不再与宿主的新放置逻辑打架。
+  - **团队任务板写入迁移到内置 Agent Team 服务**：实验包升级为 base composition 里的 `@deepseek-ai/dsh-agent-team`，按会话开启；插件用 `isEnabled` 判断 Team 模式，任务读取仍走 `agentTeam` 投影与子代理名册。
+  - **依赖与安装脚本同步**：14 条 DSH peer 下限改为 `^0.2.2-rc.2`，dev 钉版同步并把新增的 `dsh-error` 传递 peer 提升进开发依赖；Cordis 4.1.0 / include 1.1.0。
+  - **支持线**：DSH 0.2.2-rc.2+ 使用本版本；仍停在 **0.2.2-rc.1** 的宿主请固定 **v0.32.0**。
+  - 🖼 **插件页有了图文详情**：DSH 的插件页现在展示右侧栏总览图与「每个会话独立」示意图，并用编号说明文件、编辑器、文件变动、任务与侧边对话；`locale/*.json` 的 `meta.detail` 指向 `detail/DETAIL*.md`，SVG 随 npm 包发布。
+  - 🧪 测试：宿主菜单子卡改为 portal 后，打开方式/子菜单用例改按子卡标记定位；团队写路由单测改为 `isEnabled` 三条分支；基线/peer 守护同步；新增 `tests/plugin-detail.spec.ts` 与 tarball 详情资源断言；真实 0.2.2-rc.2 宿主 + Chromium 的挂载冒烟见适配记录。
+
 
 ### v0.32.0
 

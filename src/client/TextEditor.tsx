@@ -1314,7 +1314,7 @@ export function TextEditor(props: FileViewerProps) {
         portal
         compact
         align="start"
-        getAnchorRect={() => (editorMenu === null ? null : new DOMRect(editorMenu.x, editorMenu.y, 0, 0))}
+        anchorPoint={editorMenu === null ? undefined : { x: editorMenu.x, y: editorMenu.y }}
         anchor={<span />}
       />
     </>
