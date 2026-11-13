@@ -224,6 +224,7 @@ export const th: Record<string, string> = {
   gitMergeChanges: 'การเปลี่ยนแปลงจากการผสาน',
   gitStagedChanges: 'การเปลี่ยนแปลงที่ Stage แล้ว',
   gitMoreActions: 'การดำเนินการเพิ่มเติม',
+  gitRepoCount: '{count} ที่เก็บโค้ด',
   gitRepository: 'ที่เก็บ',
   gitDetached: 'HEAD ที่แยกออก',
   gitBranchesUnavailable: 'ไม่มี branch ที่พร้อมใช้งาน',

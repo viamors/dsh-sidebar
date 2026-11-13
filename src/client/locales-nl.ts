@@ -222,6 +222,7 @@ export const nl: Record<string, string> = {
   gitMergeChanges: 'Mergewijzigingen',
   gitStagedChanges: 'Gestagede wijzigingen',
   gitMoreActions: 'Meer acties',
+  gitRepoCount: '{count} repos',
   gitRepository: 'Repository',
   gitDetached: 'Losgekoppelde HEAD',
   gitBranchesUnavailable: 'Geen branches beschikbaar',

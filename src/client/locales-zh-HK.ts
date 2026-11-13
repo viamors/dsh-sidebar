@@ -239,6 +239,7 @@ export const zhHK: Record<string, string> = {
   gitMergeChanges: '合併變更',
   gitStagedChanges: '暫存的變更',
   gitMoreActions: '更多操作',
+  gitRepoCount: '{count} 個倉庫',
   gitRepository: '倉庫',
   gitDetached: '游離 HEAD',
   gitBranchesUnavailable: '沒有可用分支',

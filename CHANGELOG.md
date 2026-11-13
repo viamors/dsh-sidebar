@@ -2,6 +2,14 @@
 
 > 本文档收录 dsh-better-sidebar 的完整发布历史（最新版摘要见 [README](README_ZH.md)；同步发布于 [GitHub Releases](https://github.com/omdsh-dev/DSH-better-sidebar/releases)）。
 
+### v1.4.0（@vimors/dsh-sidebar Fork）
+
+- 🗂 **多仓库切换器改回折叠式**：上游自 v0.30.0 起把容器内每个子仓库平铺成一排胶囊，项目一多就横向铺满、难以选择。现在默认只显示一行「当前仓库 · N 个」，点击展开为**竖向有界滚动列表**（最大 208px），选中任一项后自动收起，不会遮住下方的变更列表。
+  - 折叠使用原生 `<details>`；所有 `data-scm-repo` 按钮仍保留在 DOM 中，「⋯ → 仓库」子菜单、既有测试与外部集成全部照常工作。
+  - 新增 i18n key `gitRepoCount`，已同步全部 21 份词典（`tests/locales.spec.ts` 校验 key 集合一致）。
+- 🧹 顺带清掉上次合并遗留的 3 个未使用变量/导入，lint 恢复全绿。
+- 🧪 验证：typecheck 0 error、lint 0 error、全量 vitest 3599 passed（5 个失败均为 `fs-operations` / `git-graph` / `git-worktree` 满载 30s 超时 flake，隔离重跑 49/49 全绿）；新增 2 条折叠行为测试。
+
 ### v1.3.0（@vimors/dsh-sidebar Fork）
 
 > vimors 维护的增强 Fork，基于上游 **v0.32.0 / DSH 0.2.2 线**；包名 `@vimors/dsh-sidebar`，与官方 `dsh-better-sidebar` 并行发布。

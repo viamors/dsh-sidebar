@@ -210,6 +210,7 @@ export const de: Record<string, string> = {
   gitMergeChanges: 'Merge-Änderungen',
   gitStagedChanges: 'Gestagte Änderungen',
   gitMoreActions: 'Weitere Aktionen',
+  gitRepoCount: '{count} Repos',
   gitRepository: 'Repository',
   gitDetached: 'Losgelöster HEAD',
   gitBranchesUnavailable: 'Keine Branches verfügbar',

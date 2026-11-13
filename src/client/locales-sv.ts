@@ -207,6 +207,7 @@ export const sv: Record<string, string> = {
   gitMergeChanges: 'Sammanslagningsändringar',
   gitStagedChanges: 'Köade ändringar',
   gitMoreActions: 'Fler åtgärder',
+  gitRepoCount: '{count} repon',
   gitRepository: 'Arkiv',
   gitDetached: 'Frikopplad HEAD',
   gitBranchesUnavailable: 'Inga grenar tillgängliga',

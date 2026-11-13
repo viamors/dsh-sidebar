@@ -216,6 +216,7 @@ export const ko: Record<string, string> = {
   gitMergeChanges: '병합 변경 사항',
   gitStagedChanges: '스테이징된 변경 사항',
   gitMoreActions: '추가 작업',
+  gitRepoCount: '{count}개 저장소',
   gitRepository: '저장소',
   gitDetached: '분리된 HEAD',
   gitBranchesUnavailable: '사용 가능한 브랜치가 없습니다',

@@ -4,6 +4,14 @@
 >
 > 📝 The Chinese [CHANGELOG](./CHANGELOG.md) is the authoritative, item-by-item record; this file carries the English summaries and has historically lagged behind it. Where the two disagree, the Chinese one is current.
 
+### v1.4.0 (@vimors/dsh-sidebar Fork)
+
+- 🗂 **The multi-repository switcher is collapsible again.** Upstream (since v0.30.0) laid every child repository out as a flat row of chips; with a dozen projects it filled the strip and forced sideways scrolling. It now shows a single line — the active checkout plus the total — and expands into a **bounded vertical scrolling list** (max 208px). Picking a repository collapses it again so the change groups are never covered.
+  - Built on native `<details>`; all `data-scm-repo` buttons stay in the DOM, so the ⋯ → Repository submenu, existing tests and external integrations keep working.
+  - New i18n key `gitRepoCount`, synced across all 21 dictionaries (key-set equality guarded by `tests/locales.spec.ts`).
+- 🧹 Removed 3 stale unused imports/variables left by the previous merge; lint is clean again.
+- 🧪 Verified: typecheck clean, lint clean, full vitest 3599 passed (5 failures are load-related 30s timeouts in `fs-operations` / `git-graph` / `git-worktree`, 49/49 green in isolation); 2 new collapse-behavior tests added.
+
 ### v1.3.0 (@vimors/dsh-sidebar Fork)
 
 > The vimors-maintained enhanced fork, based on upstream **v0.32.0 / the DSH 0.2.2 line**, published as `@vimors/dsh-sidebar` alongside the official `dsh-better-sidebar`.

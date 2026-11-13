@@ -10,7 +10,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
   IconBranchOutlineRegular, IconCheckOutlineRegular, IconChevronRightOutlineRegular,
-  IconCloseFillRegular, IconCodeOutlineRegular, IconCopyOutlineRegular, IconDownloadOutlineRegular,
+  IconCloseFillRegular, IconCodeOutlineRegular, IconCopyOutlineRegular,
   IconEllipsisOutlineRegular, IconFolderOpenRegular,
   IconPlusOutlineRegular,
   IconRefreshOutlineRegular, IconSearchOutlineRegular, IconSparkleRegular, IconTrashOutlineRegular, Menu, writeClipboard,
@@ -457,6 +457,8 @@ export function GitLens(props: GitLensProps) {
    *  its own bounded page on each tick instead of duplicating status here. */
   const [graphRefresh, setGraphRefresh] = useState(0)
   const [changesOpen, setChangesOpen] = useState(true)
+  /** The multi-repo switcher's <details> element (collapses after a pick). */
+  const repoSwitcherRef = useRef<HTMLDetailsElement>(null)
   const [graphOpen, setGraphOpen] = useState(true)
   /** The file filter over the change list (a case-insensitive path substring).
    *  Typing NARROWS the groups in place — the same rows, their directories
@@ -1016,11 +1018,9 @@ export function GitLens(props: GitLensProps) {
     // memoized rows below keep their props and never re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contentKey])
-  // The band totals (#131) sum the very nodes the rows render, so the header
-  // can never disagree with the numbers printed under it.
-  const unstagedTotal = useMemo(() => sumLineCounts(unstagedTree), [unstagedTree])
-  const stagedTotal = useMemo(() => sumLineCounts(stagedTree), [stagedTree])
-
+  // The band totals are computed per rendered view inside `renderGroup`, so the
+  // header can never disagree with the numbers printed under it (and with the
+  // active filter pruning rows).
   /** The typed filter as the trees read it (empty ⇒ no filtering at all). */
   const needle = filter.trim().toLowerCase()
   // One pruned copy per group, rebuilt only when the needle or the group's own
@@ -1183,20 +1183,44 @@ export function GitLens(props: GitLensProps) {
             panel silently shows the first root, so nothing on screen says the
             others exist. The switcher is not a second source of truth:
             `repoChoices` comes from the status snapshot, `chooseRepo` re-pins
-            the scope (reads, writes, graph) to the clicked root. */}
+            the scope (reads, writes, graph) to the clicked root.
+
+            Fork tweak: the upstream row rendered one chip per root FLAT, which
+            sprawled across (and horizontally scrolled) the whole pane as soon
+            as a container held a dozen projects. It is now a native
+            <details>: one summary line — the active checkout plus the total —
+            and, when opened, a bounded vertical list that scrolls. The chips
+            stay in the DOM (and keep data-scm-repo) so the ⋯ → Repository
+            submenu, the tests and any external integration still see them. */}
         {isRepo && repoChoices.length > 1 && (
-          <div className={css.repoSwitcher} data-scm-repos role="group" aria-label={t('gitRepository')}>
-            {repoChoices.map(root => {
-              const isActive = sameRepoRoot(root, repoRoot ?? snapshot?.root)
-              return (
-                <button key={root} type="button" className={css.repoChip} data-scm-repo={root}
-                  data-active={isActive ? 'true' : undefined} aria-pressed={isActive} title={root}
-                  disabled={busy || suggesting} onClick={() => { chooseRepo(root) }}>
-                  {baseName(root)}
-                </button>
-              )
-            })}
-          </div>
+          <details
+            className={css.repoSwitcher} data-scm-repos role="group"
+            aria-label={t('gitRepository')} ref={repoSwitcherRef}
+          >
+            <summary className={css.repoSummary} data-scm-repos-summary>
+              <span className={css.chevron} aria-hidden="true"><IconChevronRightOutlineRegular size={12} /></span>
+              <span className={css.repoSummaryName}>
+                {baseName(repoChoices.find(root => sameRepoRoot(root, repoRoot ?? snapshot?.root)) ?? repoChoices[0]!)}
+              </span>
+              <span className={css.repoCount}>{t('gitRepoCount', { count: repoChoices.length })}</span>
+            </summary>
+            <div className={css.repoList} data-scm-repo-list>
+              {repoChoices.map(root => {
+                const isActive = sameRepoRoot(root, repoRoot ?? snapshot?.root)
+                return (
+                  <button key={root} type="button" className={css.repoChip} data-scm-repo={root}
+                    data-active={isActive ? 'true' : undefined} aria-pressed={isActive} title={root}
+                    disabled={busy || suggesting} onClick={() => {
+                      chooseRepo(root)
+                      // Collapse after a pick so the list never covers the change groups.
+                      if (repoSwitcherRef.current !== null) repoSwitcherRef.current.open = false
+                    }}>
+                    {baseName(root)}
+                  </button>
+                )
+              })}
+            </div>
+          </details>
         )}
 
         {isRepo && (

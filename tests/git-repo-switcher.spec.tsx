@@ -104,3 +104,37 @@ it('renders no switcher for a single-repository workspace', async () => {
   // The ordinary panel is intact: the Changes section is still there.
   expect(view.container.querySelector('[data-scm-section="changes"]')).not.toBeNull()
 })
+
+// ── Fork: collapsed switcher (upstream rendered every chip flat, which filled
+// the strip when a container held a dozen projects) ──────────────────────────
+
+it('renders a collapsed switcher with the active checkout and the repo count', async () => {
+  const view = await mount({ sessionId: 'scm-repos-collapsed', repositories: [CWD, ADMIN, DOCS] })
+  const { container } = view
+  const details = container.querySelector<HTMLDetailsElement>('details[data-scm-repos]')!
+  expect(details).not.toBeNull()
+  expect(details.open).toBe(false) // collapsed by default — one line, not N chips
+  const summary = details.querySelector<HTMLElement>('[data-scm-repos-summary]')!
+  expect(summary.textContent).toContain('work')
+  expect(summary.textContent).toContain('3')
+  // The chips are still present for the ⋯ submenu, tests and integrations.
+  expect(chips(container)).toHaveLength(3)
+  const list = details.querySelector<HTMLElement>('[data-scm-repo-list]')!
+  expect(list).not.toBeNull()
+  // Bounded vertical list: never a flat, sideways-scrolling row.
+  await act(async () => { details.open = true })
+  expect(details.open).toBe(true)
+  expect(chips(container)).toHaveLength(3)
+})
+
+it('collapses again after picking a repository', async () => {
+  const view = await mount({ sessionId: 'scm-repos-pick-collapse' })
+  const details = view.container.querySelector<HTMLDetailsElement>('details[data-scm-repos]')!
+  await act(async () => { details.open = true })
+  await click(chips(view.container)[1]!)
+  await flush()
+  await flush()
+  expect(view.scopes.at(-1)?.repoRoot).toBe(ADMIN)
+  expect(details.open).toBe(false)
+  expect(chips(view.container)[1]!.getAttribute('data-active')).toBe('true')
+})

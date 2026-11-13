@@ -224,6 +224,7 @@ export const hi: Record<string, string> = {
   gitMergeChanges: 'मर्ज के बदलाव',
   gitStagedChanges: 'स्टेज किए गए बदलाव',
   gitMoreActions: 'और कार्रवाइयाँ',
+  gitRepoCount: '{count} रिपॉज़िटरी',
   gitRepository: 'रिपॉज़िटरी',
   gitDetached: 'अलग HEAD',
   gitBranchesUnavailable: 'कोई ब्रांच उपलब्ध नहीं',

@@ -222,6 +222,7 @@ export const id: Record<string, string> = {
   gitMergeChanges: 'Perubahan penggabungan',
   gitStagedChanges: 'Perubahan yang di-stage',
   gitMoreActions: 'Tindakan lainnya',
+  gitRepoCount: '{count} repositori',
   gitRepository: 'Repositori',
   gitDetached: 'HEAD terlepas',
   gitBranchesUnavailable: 'Tidak ada branch yang tersedia',

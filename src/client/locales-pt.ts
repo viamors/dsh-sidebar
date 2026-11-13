@@ -207,6 +207,7 @@ export const pt: Record<string, string> = {
   gitMergeChanges: 'Alterações de mesclagem',
   gitStagedChanges: 'Alterações preparadas',
   gitMoreActions: 'Mais ações',
+  gitRepoCount: '{count} repositórios',
   gitRepository: 'Repositório',
   gitDetached: 'HEAD desanexado',
   gitBranchesUnavailable: 'Nenhuma branch disponível',
